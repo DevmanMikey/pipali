@@ -59,6 +59,7 @@ export type ChatAction =
     | { type: 'RUN_STARTED'; conversationId: string; runId: string; clientMessageId: string; suggestedRunId?: string }
     | { type: 'RUN_STOPPED'; conversationId: string; runId: string; reason: StopReason; error?: string }
     | { type: 'RUN_COMPLETE'; conversationId: string; runId: string; response: string; stepId: number }
+    | { type: 'TEXT_DELTA'; conversationId: string; runId: string; delta: string }
     | { type: 'STEP_START'; conversationId: string; runId: string; thought?: string; message?: string; toolCalls: any[] }
     | { type: 'STEP_END'; conversationId: string; runId: string; toolResults: any[]; stepId: number }
     | { type: 'CONFIRMATION_REQUEST'; conversationId: string; runId: string; request: ConfirmationRequest }
@@ -701,6 +702,39 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 messages: isCurrentConversation ? finalizeMessages(state.messages) : state.messages,
                 conversationStates,
                 pendingConfirmations,
+            };
+        }
+
+        case 'TEXT_DELTA': {
+            const { conversationId, runId, delta } = action;
+            const isCurrentConversation = conversationId === state.conversationId;
+
+            const updateMessagesWithDelta = (msgs: Message[]): Message[] => {
+                const idx = findRunAssistantIndex(msgs, runId);
+                if (idx === -1) return msgs;
+
+                const assistant = msgs[idx];
+                if (!assistant) return msgs;
+
+                return msgs.map((msg, i) => {
+                    if (i !== idx) return msg;
+                    return { ...msg, content: (msg.content || '') + delta };
+                });
+            };
+
+            const conversationStates = new Map(state.conversationStates);
+            const existing = conversationStates.get(conversationId);
+            if (existing) {
+                conversationStates.set(conversationId, {
+                    ...existing,
+                    messages: updateMessagesWithDelta(existing.messages),
+                });
+            }
+
+            return {
+                ...state,
+                messages: isCurrentConversation ? updateMessagesWithDelta(state.messages) : state.messages,
+                conversationStates,
             };
         }
 
@@ -1392,6 +1426,15 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 });
                 releaseWakeLock();
                 onTaskCompleteCb?.(undefined, message.data.response, convId);
+                break;
+
+            case 'text_delta':
+                dispatch({
+                    type: 'TEXT_DELTA',
+                    conversationId: convId,
+                    runId,
+                    delta: message.data.delta,
+                });
                 break;
 
             case 'step_start':

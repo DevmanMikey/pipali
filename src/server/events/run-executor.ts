@@ -198,6 +198,14 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 systemPrompt: systemPromptOverride,
                 chatModelId,
                 runId: runIdAuthoritative,
+                onTextDelta: (delta) => {
+                    bus.publish({
+                        type: 'text_delta',
+                        conversationId,
+                        runId: runIdAuthoritative,
+                        data: { delta },
+                    });
+                },
             });
 
             let iteratorResult = await runner.next();

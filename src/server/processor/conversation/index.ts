@@ -29,6 +29,7 @@ export async function sendMessageToModel(
     user?: typeof User.$inferSelect,
     chatModelId?: number,
     runId?: string,
+    onTextChunk?: (chunk: string) => void,
 ) {
     // Check for test mock (E2E tests inject this via preload)
     if (globalThis.__pipaliMockLLM) {
@@ -94,6 +95,7 @@ export async function sendMessageToModel(
                     pricing,
                     conversationId,
                     runId,
+                    onTextChunk,
                 );
             });
             log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
@@ -118,6 +120,9 @@ export async function sendMessageToModel(
                 tools,
                 toolChoice,
                 pricing,
+                conversationId,
+                runId,
+                onTextChunk,
             );
             log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
             return response;

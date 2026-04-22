@@ -101,6 +101,8 @@ interface ResearchConfig {
     isFirstEverConversation?: boolean;
     // Conversation ID for tools that need to reference the current conversation
     conversationId?: string;
+    // Callback for real-time text delta streaming
+    onTextChunk?: (chunk: string) => void;
 }
 
 export async function buildSystemPrompt(args: {
@@ -558,6 +560,7 @@ async function pickNextTool(
             config.user, // user - for user's selected model
             config.chatModelId,
             config.runId,
+            config.onTextChunk,
         );
 
         // Check if response is valid

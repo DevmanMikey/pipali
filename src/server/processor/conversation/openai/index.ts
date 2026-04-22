@@ -17,6 +17,7 @@ export async function sendMessageToGpt(
     pricing?: PricingConfig,
     conversationId?: string,
     runId?: string,
+    onTextChunk?: (chunk: string) => void,
 ): Promise<ResponseWithThought> {
     const openaiTools = toOpenaiTools(tools);
 
@@ -39,6 +40,12 @@ export async function sendMessageToGpt(
         tool_choice: openaiTools ? toolChoice as Responses.ToolChoiceOptions : undefined,
         ...(Object.keys(tracer).length > 0 && { metadata: tracer }),
     });
+
+    if (onTextChunk) {
+        stream.on('response.output_text.delta', (event) => {
+            onTextChunk(event.delta);
+        });
+    }
 
     const response = await stream.finalResponse();
 
