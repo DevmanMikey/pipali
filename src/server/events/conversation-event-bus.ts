@@ -115,6 +115,9 @@ export class ConversationEventBus {
         const pending = this.activeRun.pendingConfirmations;
 
         return this.recentEvents.filter(e => {
+            // Text deltas are append-only on the client. Replaying them after
+            // localStorage hydration can duplicate partially streamed content.
+            if (e.type === 'text_delta') return false;
             if (e.type !== 'confirmation_request') return true;
             const requestId = (e as any)?.data?.requestId;
             return typeof requestId === 'string' && pending.has(requestId);

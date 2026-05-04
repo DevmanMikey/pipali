@@ -81,6 +81,20 @@ describe('ConversationEventBus', () => {
         expect(replay[1]?.type).toBe('step_start');
     });
 
+    test('text deltas are delivered live but not replayed', () => {
+        const bus = new ConversationEventBus('conv-1');
+        bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');
+        const received: ConversationEvent[] = [];
+        bus.subscribe(event => received.push(event));
+
+        bus.publish({ type: 'run_started', conversationId: 'conv-1', runId: 'r1', clientMessageId: 'm1' });
+        bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'Hello' } });
+        bus.publish({ type: 'step_start', conversationId: 'conv-1', runId: 'r1', data: { toolCalls: [] } });
+
+        expect(received.map(e => e.type)).toEqual(['run_started', 'text_delta', 'step_start']);
+        expect(bus.getReplayEvents().map(e => e.type)).toEqual(['run_started', 'step_start']);
+    });
+
     test('replay buffer resets on run_started', () => {
         const bus = new ConversationEventBus('conv-1');
         bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');
