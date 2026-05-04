@@ -17,6 +17,8 @@ export type Message = {
     };
     /** File names attached by the user (extracted from <attached_files> block) */
     attachedFiles?: string[];
+    /** True for user messages waiting in the soft-interrupt queue (run_started not yet received). */
+    isQueued?: boolean;
 };
 
 export type Thought = {

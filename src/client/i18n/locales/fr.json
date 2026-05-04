@@ -76,7 +76,12 @@
         "noModelsAvailable": "Aucun mod\u00e8le disponible",
         "selectModel": "Choisir un mod\u00e8le",
         "sendMessage": "Envoyer le message (interruption douce)",
-        "stop": "Arr\u00eater (\u00c9chap)"
+        "stop": "Arr\u00eater (\u00c9chap)",
+        "tierFlagship": "Phare",
+        "tierBalanced": "\u00c9quilibr\u00e9",
+        "tierLite": "L\u00e9ger",
+        "tierOther": "Autre",
+        "recommended": "Recommand\u00e9"
     },
     "home": {
         "greetings": {
@@ -157,7 +162,8 @@
         "backgroundTask": "T\u00e2che en arri\u00e8re-plan",
         "untitled": "Sans titre",
         "routine": "Routine",
-        "activeTasks": "Tâches actives",
+        "activeTasks": "Tâches",
+        "clearFinished": "Effacer les tâches terminées",
         "taskCount_one": "{{count}} tâche",
         "taskCount_other": "{{count}} tâches"
     },
@@ -509,6 +515,7 @@
     },
     "messages": {
         "deleteMessage": "Supprimer le message",
-        "pleaseLookAtFiles": "Consulte les fichiers joints."
+        "pleaseLookAtFiles": "Consulte les fichiers joints.",
+        "queued": "En file d'attente"
     }
 }

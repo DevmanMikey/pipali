@@ -91,6 +91,36 @@ describe('Tool Protection - Sensitive Path Confirmation', () => {
             expect(result.compiled).not.toContain('FAKE_SSH_KEY_CONTENT');
         });
 
+        test('should include attachments when user gives alternate guidance', async () => {
+            const capturedRequests: ConfirmationRequest[] = [];
+            const context: ConfirmationContext = {
+                requestConfirmation: async (request) => {
+                    capturedRequests.push(request);
+                    return {
+                        requestId: request.requestId,
+                        selectedOptionId: CONFIRMATION_OPTIONS.GUIDANCE,
+                        guidance: 'Use the attached sanitized copy instead.',
+                        attachments: [
+                            { path: '/tmp/pipali-upload/sanitized-key.txt', name: 'sanitized-key.txt' },
+                        ],
+                        timestamp: new Date().toISOString(),
+                    };
+                },
+                preferences: createEmptyPreferences(),
+            };
+
+            const result = await readFile(
+                { path: sensitiveFile },
+                { confirmationContext: context }
+            );
+
+            expect(capturedRequests.length).toBe(1);
+            expect(result.compiled).toContain('Use the attached sanitized copy instead.');
+            expect(result.compiled).toContain('<attached_files>');
+            expect(result.compiled).toContain('- /tmp/pipali-upload/sanitized-key.txt');
+            expect(result.compiled).not.toContain('FAKE_SSH_KEY_CONTENT');
+        });
+
         test('should NOT request confirmation for normal files', async () => {
             const capturedRequests: ConfirmationRequest[] = [];
             const context = createMockConfirmationContext(true, capturedRequests);

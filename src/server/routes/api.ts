@@ -216,6 +216,7 @@ api.get('/conversations', async (c) => {
         title: Conversation.title,
         createdAt: Conversation.createdAt,
         updatedAt: Conversation.updatedAt,
+        chatModelId: Conversation.chatModelId,
         trajectory: Conversation.trajectory,
         automationId: Conversation.automationId,
         isPinned: Conversation.isPinned,
@@ -284,6 +285,7 @@ api.get('/conversations', async (c) => {
             preview,
             createdAt: conv.createdAt,
             updatedAt: conv.updatedAt,
+            chatModelId: conv.chatModelId,
             isActive,
             isAutomation: !!conv.automationId,
             isPinned: conv.isPinned,
@@ -441,6 +443,10 @@ api.get('/models', async (c) => {
         visionEnabled: ChatModel.visionEnabled,
         inputCostPerMillion: ChatModel.inputCostPerMillion,
         outputCostPerMillion: ChatModel.outputCostPerMillion,
+        tier: ChatModel.tier,
+        tagline: ChatModel.tagline,
+        costTier: ChatModel.costTier,
+        recommended: ChatModel.recommended,
     })
     .from(ChatModel)
     .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id));

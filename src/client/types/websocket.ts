@@ -41,7 +41,13 @@ export interface ConfirmationResponse {
         textValue?: string;
     };
     persistPreference?: boolean;
+    attachments?: ConfirmationResponseAttachment[];
     timestamp: string;
+}
+
+export interface ConfirmationResponseAttachment {
+    path: string;
+    name?: string;
 }
 
 // ============================================================================

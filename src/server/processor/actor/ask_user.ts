@@ -6,6 +6,7 @@
  */
 
 import type { ConfirmationContext } from '../confirmation';
+import { formatConfirmationAttachmentBlock } from '../confirmation';
 import type {
     ConfirmationOption,
     ConfirmationInputType,
@@ -165,13 +166,21 @@ export async function askUser(
 
         // Request response from user
         const response = await confirmationContext.requestConfirmation(request);
+        const attachmentBlock = formatConfirmationAttachmentBlock(response.attachments);
 
         // Handle free-form response via guidance field
         if (response.guidance && response.guidance.trim()) {
             return {
                 query,
-                compiled: `User responded: ${response.guidance}`,
+                compiled: `User responded: ${response.guidance}${attachmentBlock}`,
                 freeformResponse: response.guidance,
+            };
+        }
+
+        if (response.selectedOptionId === 'guidance' && attachmentBlock) {
+            return {
+                query,
+                compiled: `User responded with attachments:${attachmentBlock}`,
             };
         }
 
@@ -179,7 +188,7 @@ export async function askUser(
         if (isTextInput && response.inputData?.textValue) {
             return {
                 query,
-                compiled: `User entered: ${response.inputData.textValue}`,
+                compiled: `User entered: ${response.inputData.textValue}${attachmentBlock}`,
                 textInput: response.inputData.textValue,
             };
         }
@@ -188,7 +197,7 @@ export async function askUser(
         if (isNotification && response.selectedOptionId === 'acknowledge') {
             return {
                 query,
-                compiled: `User acknowledged: "${title}"`,
+                compiled: `User acknowledged: "${title}"${attachmentBlock}`,
                 acknowledged: true,
             };
         }
@@ -203,7 +212,7 @@ export async function askUser(
                 if (selectedLabel) {
                     return {
                         query,
-                        compiled: `User selected: ${selectedLabel}`,
+                        compiled: `User selected: ${selectedLabel}${attachmentBlock}`,
                         selectedLabel,
                     };
                 }
@@ -213,7 +222,7 @@ export async function askUser(
         // Fallback: return the raw selected option ID
         return {
             query,
-            compiled: `User selected: ${response.selectedOptionId}`,
+            compiled: `User selected: ${response.selectedOptionId}${attachmentBlock}`,
             selectedLabel: response.selectedOptionId,
         };
 

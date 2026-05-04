@@ -127,7 +127,7 @@ test.describe('Home Page Task Gallery', () => {
         expect(countText).toContain('tasks');
     });
 
-    test('should show stopped status when task is stopped', async ({ page }) => {
+    test('should remove task from home gallery when user stops it', async ({ page }) => {
         // Start a background task (use pausable for slow execution)
         const query = uniqueQuery(PAUSABLE_QUERY);
         await homePage.sendBackgroundMessage(query);
@@ -144,12 +144,9 @@ test.describe('Home Page Task Gallery', () => {
         // Go back to home by clicking logo (preserves React state)
         await chatPage.goHome();
 
-        // The task should still be in the gallery
-        await expect(homePage.getTaskCardByTitle(query)).toBeVisible();
-        // The task should show stopped
-        const card = homePage.getTaskCardByTitle(query);
-        await expect(card.locator('.task-status-icon.stopped')).toBeVisible();
-        await expect(card.locator('.task-status-text.stopped')).toBeVisible();
+        // User-initiated stops are excluded from the home gallery —
+        // the user is already aware they stopped it, so no surface needed.
+        await expect(homePage.getTaskCardByTitle(query)).toHaveCount(0);
     });
 
     test('should show task gallery header with correct count', async ({ page }) => {
@@ -196,24 +193,17 @@ test.describe('Home Page Task Gallery', () => {
         }
     });
 
-    test('should show completed task card after foreground task finishes', async ({ page }) => {
-        // Start a quick foreground task (not background)
-        const chatPage = new ChatPage(page);
-        await chatPage.goto();
+    test('should show completed task card when background task finishes off-screen', async ({ page }) => {
+        // Send as background (Cmd+Enter) so the user stays on home and never
+        // views the conversation. The home gallery only surfaces completion
+        // for conversations the user did not watch finish in-place.
         const query = uniqueQuery('list all files');
-        await chatPage.sendMessage(query);
-        await chatPage.waitForAssistantResponse();
+        await homePage.sendBackgroundMessage(query);
+        await homePage.waitForTaskWithTitle(query);
 
-        // Go to home page
-        await chatPage.goHome();
-
-        // Wait a moment for state to settle
-        await page.waitForTimeout(500);
-
-        // Completed task should still be visible with completed status
-        await expect(homePage.getTaskCardByTitle(query)).toBeVisible();
+        // Wait for the run to complete with the user still on the home page
         const card = homePage.getTaskCardByTitle(query);
-        await expect(card.locator('.task-status-icon.completed')).toBeVisible();
+        await expect(card.locator('.task-status-icon.completed')).toBeVisible({ timeout: 15000 });
         await expect(card.locator('.task-status-text.completed')).toBeVisible();
 
         // Subtitle should show the final response, not intermediate reasoning

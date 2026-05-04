@@ -9,6 +9,7 @@ import type { ClientMessage, ForkCommand } from '../message-types';
 import { createSession, createRunningState } from '../session-state';
 import { createEmptyPreferences } from '../../../processor/confirmation';
 import { atifConversationService } from '../../../processor/conversation/atif/atif.service';
+import { getChatModelById } from '../../../db';
 import { createChildLogger } from '../../../logger';
 
 const log = createChildLogger({ component: 'fork-command' });
@@ -20,7 +21,7 @@ export const ForkCommandHandler: Command<ForkCommand> = {
 
     async execute(ctx: CommandContext, message: ForkCommand): Promise<void> {
         const sessions = ctx.getSessions();
-        const { message: userQuery, sourceConversationId, clientMessageId, runId } = message;
+        const { message: userQuery, sourceConversationId, chatModelId, clientMessageId, runId } = message;
 
         if (!userQuery) {
             log.warn('Received fork request without message');
@@ -40,10 +41,20 @@ export const ForkCommandHandler: Command<ForkCommand> = {
             return;
         }
 
+        if (chatModelId !== undefined) {
+            const selectedModel = await getChatModelById(chatModelId);
+            if (!selectedModel) {
+                ctx.sendError('Selected chat model not found');
+                return;
+            }
+        }
+
         // Fork the conversation
         const forkedConversation = await atifConversationService.forkConversation(
             sourceConversationId,
-            user
+            user,
+            undefined,
+            chatModelId,
         );
 
         // Send conversation_created with full history
@@ -54,7 +65,8 @@ export const ForkCommandHandler: Command<ForkCommand> = {
             forkedConversation.id,
             user,
             createEmptyPreferences(),
-            userQuery
+            userQuery,
+            forkedConversation.chatModelId ?? chatModelId,
         );
 
         // Start the run

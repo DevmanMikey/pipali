@@ -76,7 +76,12 @@
         "noModelsAvailable": "Keine Modelle verfügbar",
         "selectModel": "Modell auswählen",
         "sendMessage": "Nachricht senden (sanfte Unterbrechung)",
-        "stop": "Stoppen (Esc)"
+        "stop": "Stoppen (Esc)",
+        "tierFlagship": "Flaggschiff",
+        "tierBalanced": "Ausgewogen",
+        "tierLite": "Leicht",
+        "tierOther": "Sonstige",
+        "recommended": "Empfohlen"
     },
     "home": {
         "greetings": {
@@ -157,7 +162,8 @@
         "backgroundTask": "Hintergrund-Task",
         "untitled": "Ohne Titel",
         "routine": "Routine",
-        "activeTasks": "Aktive Tasks",
+        "activeTasks": "Tasks",
+        "clearFinished": "Erledigte löschen",
         "taskCount_one": "{{count}} Task",
         "taskCount_other": "{{count}} Tasks"
     },
@@ -509,6 +515,7 @@
     },
     "messages": {
         "deleteMessage": "Nachricht löschen",
-        "pleaseLookAtFiles": "Bitte schau dir die angehängten Dateien an."
+        "pleaseLookAtFiles": "Bitte schau dir die angehängten Dateien an.",
+        "queued": "In Warteschlange"
     }
 }

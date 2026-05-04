@@ -33,6 +33,8 @@ export interface ReadWebpageArgs {
     url: string;
     /** The query/question to extract relevant information for */
     query?: string;
+    /** Bypass the scraper cache and fetch a live copy of the page */
+    fresh?: boolean;
 }
 
 /**
@@ -62,17 +64,21 @@ export interface ReadWebpageOptions {
 async function readWithPlatform(
     url: string,
     query: string | undefined,
+    fresh: boolean | undefined,
     conversationId?: string,
     runId?: string,
 ): Promise<string | null> {
     const endpoint = `${getPlatformUrl()}/tools/read-webpage`;
 
-    const payload: { url: string; query?: string } = { url };
+    const payload: { url: string; query?: string; fresh?: boolean } = { url };
     if (query) {
         payload.query = query;
     }
+    if (fresh) {
+        payload.fresh = true;
+    }
 
-    log.debug(`Read using Pipali Platform: ${url}`);
+    log.debug(`Read using Pipali Platform: ${url}${fresh ? ' (fresh)' : ''}`);
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (conversationId) headers['X-Pipali-Conversation-ID'] = conversationId;
@@ -100,21 +106,27 @@ async function readWithPlatform(
  * Read webpage content using direct URL fetch
  * Fetches HTML/JSON and converts to text
  */
-async function readWithDirectFetch(url: string): Promise<string | null> {
-    log.debug(`Reading with direct fetch: ${url}`);
+async function readWithDirectFetch(url: string, fresh?: boolean): Promise<string | null> {
+    log.debug(`Reading with direct fetch: ${url}${fresh ? ' (fresh)' : ''}`);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_REQUEST_TIMEOUT);
 
     try {
+        const headers: Record<string, string> = {
+            'User-Agent': USER_AGENT,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        };
+        if (fresh) {
+            headers['Cache-Control'] = 'no-cache';
+            headers['Pragma'] = 'no-cache';
+        }
         const response = await fetch(url, {
-            headers: {
-                'User-Agent': USER_AGENT,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-            },
+            headers,
             signal: controller.signal,
             redirect: 'follow',
+            ...(fresh ? { cache: 'no-store' as RequestCache } : {}),
         });
 
         clearTimeout(timeoutId);
@@ -209,7 +221,7 @@ export async function readWebpage(
     conversationId?: string,
     runId?: string,
 ): Promise<ReadWebpageResult> {
-    const { url, query } = args;
+    const { url, query, fresh } = args;
 
     // Handle both old signature (metricsAccumulator) and new signature (options object)
     const opts: ReadWebpageOptions = options && 'confirmationContext' in options
@@ -264,7 +276,7 @@ export async function readWebpage(
 
         // Try platform scraper first
         try {
-            rawContent = await readWithPlatform(url, query, conversationId, runId);
+            rawContent = await readWithPlatform(url, query, fresh, conversationId, runId);
             if (rawContent) usedPlatform = true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -274,7 +286,7 @@ export async function readWebpage(
         // Fall back to direct URL fetch
         if (!rawContent) {
             try {
-                rawContent = await readWithDirectFetch(url);
+                rawContent = await readWithDirectFetch(url, fresh);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 log.warn(`Direct fetch failed: ${message}`);

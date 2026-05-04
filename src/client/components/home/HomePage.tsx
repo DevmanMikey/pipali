@@ -8,11 +8,12 @@ import { EmptyHomeState } from './EmptyHomeState';
 interface HomePageProps {
     activeTasks: ActiveTask[];
     onSelectTask: (conversationId: string) => void;
+    onClearFinished: () => void;
     userFirstName?: string;
     hasInput?: boolean;
 }
 
-export function HomePage({ activeTasks, onSelectTask, userFirstName, hasInput }: HomePageProps) {
+export function HomePage({ activeTasks, onSelectTask, onClearFinished, userFirstName, hasInput }: HomePageProps) {
     return (
         <main className="main-content">
             <div className="messages-container">
@@ -22,6 +23,7 @@ export function HomePage({ activeTasks, onSelectTask, userFirstName, hasInput }:
                     <TaskCardGallery
                         tasks={activeTasks}
                         onSelectTask={onSelectTask}
+                        onClearFinished={onClearFinished}
                     />
                 )}
             </div>

@@ -128,10 +128,11 @@ async function persistUserMessage(
  * Handles queued messages by looping internally.
  */
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
-    const { bus, conversationId, user, confirmationPreferences, chatModelId, confirmationContextOverride } = options;
+    const { bus, conversationId, user, confirmationPreferences, confirmationContextOverride } = options;
     let userMessage: string | undefined = options.userMessage;
     let runId = options.runId;
     let clientMessageId = options.clientMessageId;
+    let currentChatModelId = options.chatModelId;
     let carryOverQueue: QueuedMessage[] = [];
 
     while (true) {
@@ -196,7 +197,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 abortSignal: runHandle.abortController.signal,
                 confirmationContext,
                 systemPrompt: systemPromptOverride,
-                chatModelId,
+                chatModelId: currentChatModelId,
                 runId: runIdAuthoritative,
                 onTextDelta: (delta) => {
                     bus.publish({
@@ -286,6 +287,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                     runId = next.runId;
                     clientMessageId = next.clientMessageId;
                     userMessage = next.message;
+                    currentChatModelId = next.chatModelId ?? currentChatModelId;
                     carryOverQueue = rest;
                     continue;
                 }
@@ -322,6 +324,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                     runId = next.runId;
                     clientMessageId = next.clientMessageId;
                     userMessage = next.message;
+                    currentChatModelId = next.chatModelId ?? currentChatModelId;
                     carryOverQueue = rest;
                     continue;
                 }
@@ -377,6 +380,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                         runId = next.runId;
                         clientMessageId = next.clientMessageId;
                         userMessage = next.message;
+                        currentChatModelId = next.chatModelId ?? currentChatModelId;
                         carryOverQueue = rest;
                         continue;
                     }

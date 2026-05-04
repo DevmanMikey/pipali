@@ -149,19 +149,16 @@ test.describe('Task Card Persistence', () => {
     });
 
     test('completed task card persists on home reload', async ({ page }) => {
-        const chatPage = new ChatPage(page);
-        await chatPage.goto();
+        // Send as background so the user stays on home and never views the
+        // conversation. Foreground completions are intentionally hidden from
+        // the home gallery (the user already saw them finish in-place).
+        const homePage = new HomePage(page);
+        await homePage.goto();
 
         const query = uniqueQuery('list all files');
-        await chatPage.sendMessage(query);
-        await chatPage.waitForAssistantResponse();
-
-        await chatPage.goHome();
-
-        const homePage = new HomePage(page);
-        await homePage.waitForConnection();
+        await homePage.sendBackgroundMessage(query);
         await homePage.waitForTaskWithTitle(query);
-        await expect(homePage.getTaskCardByTitle(query).locator('.task-status-text.completed')).toBeVisible();
+        await expect(homePage.getTaskCardByTitle(query).locator('.task-status-text.completed')).toBeVisible({ timeout: 15000 });
 
         await page.waitForTimeout(500);
         await page.reload({ waitUntil: 'domcontentloaded' });

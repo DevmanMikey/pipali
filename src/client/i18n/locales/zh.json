@@ -76,7 +76,12 @@
         "noModelsAvailable": "没有可用的模型",
         "selectModel": "选择模型",
         "sendMessage": "发送消息（软中断）",
-        "stop": "停止 (Esc)"
+        "stop": "停止 (Esc)",
+        "tierFlagship": "旗舰",
+        "tierBalanced": "均衡",
+        "tierLite": "轻量",
+        "tierOther": "其他",
+        "recommended": "推荐"
     },
     "home": {
         "greetings": {
@@ -157,7 +162,8 @@
         "backgroundTask": "后台任务",
         "untitled": "无标题",
         "routine": "例行任务",
-        "activeTasks": "活跃任务",
+        "activeTasks": "任务",
+        "clearFinished": "清除已结束",
         "taskCount_one": "{{count}} 个任务",
         "taskCount_other": "{{count}} 个任务"
     },
@@ -509,6 +515,7 @@
     },
     "messages": {
         "deleteMessage": "删除消息",
-        "pleaseLookAtFiles": "请查看附件。"
+        "pleaseLookAtFiles": "请查看附件。",
+        "queued": "排队中"
     }
 }

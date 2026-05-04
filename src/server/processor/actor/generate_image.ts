@@ -13,7 +13,7 @@ import { mkdir } from 'fs/promises';
 
 const log = createChildLogger({ component: 'generate_image' });
 
-const IMAGE_GEN_TIMEOUT = 60000;
+const IMAGE_GEN_TIMEOUT = 120_000;
 const IMAGES_DIR = '/tmp/pipali/images';
 
 export interface GenerateImageArgs {

@@ -20,6 +20,7 @@ export interface MessageCommand {
     type: 'message';
     message: string;
     conversationId?: string;
+    chatModelId?: number;
     clientMessageId: string;  // Client-generated ID for dedup
     runId: string;            // Client-generated run ID (server may override)
 }
@@ -40,6 +41,7 @@ export interface ForkCommand {
     type: 'fork';
     message: string;
     sourceConversationId: string;
+    chatModelId?: number;
     clientMessageId: string;
     runId: string;
 }
@@ -297,6 +299,7 @@ export interface QueuedMessage {
     runId: string;
     clientMessageId: string;
     message: string;
+    chatModelId?: number;
 }
 
 /**

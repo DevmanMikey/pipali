@@ -139,21 +139,16 @@ test.describe('Chat Flow - Complete User Journey', () => {
         const placeholder = await chatPage.inputTextarea.getAttribute('placeholder');
         expect(placeholder?.toLowerCase()).toContain('stopped');
 
-        // Check home page shows stopped status
+        // Check home page hides the user-stopped task — user-initiated stops
+        // are excluded from the gallery since the user is already aware.
         await chatPage.goHome();
-
-        // Wait for task to show stopped status
-        await homePage.waitForTaskStatus(0, 'stopped');
-
-        // Task should show stopped status
-        const stoppedStatus = await homePage.getTaskStatus(0);
-        expect(stoppedStatus).toBe('stopped');
+        await expect(homePage.taskCards).toHaveCount(0);
 
         // ============================================
         // 10. Send follow-up - wait for completion
         // ============================================
-        // Go back to chat
-        await homePage.clickTaskCard(0);
+        // Navigate back to the conversation directly (no card on home to click).
+        await chatPage.gotoConversation(convId!);
         await chatPage.waitForConnection();
 
         await chatPage.sendMessage('continue');
@@ -216,15 +211,12 @@ test.describe('Chat Flow - Complete User Journey', () => {
         }
 
         // ============================================
-        // 14. Go to home - no active cards (all tasks completed)
+        // 14. Go to home - both runs finished while the user was viewing,
+        //     so neither should surface on the home gallery.
         // ============================================
         await chatPage.goHome();
         await page.waitForTimeout(500);
 
-        // Completed tasks should show as completed cards on home
-        const taskCount = await homePage.getTaskCardCount();
-        expect(taskCount).toBeGreaterThanOrEqual(1);
-        const finalStatus = await homePage.getTaskStatus(0);
-        expect(finalStatus).toBe('completed');
+        await expect(homePage.taskCards).toHaveCount(0);
     });
 });

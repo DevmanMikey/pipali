@@ -27,7 +27,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
 
     async execute(ctx: CommandContext, message: MessageCommand): Promise<void> {
         const sessions = ctx.getSessions();
-        const { message: userQuery, conversationId, clientMessageId, runId } = message;
+        const { message: userQuery, conversationId, chatModelId, clientMessageId, runId } = message;
 
         if (!userQuery) {
             log.warn('Received message without content');
@@ -48,7 +48,16 @@ export const MessageCommandHandler: Command<MessageCommand> = {
 
                 log.info({ conversationId, runId }, 'Soft interrupt: queuing message on bus');
 
-                const queuedMessage: QueuedMessage = { runId, clientMessageId, message: userQuery };
+                if (chatModelId !== undefined) {
+                    const selectedModel = await getChatModelById(chatModelId);
+                    if (!selectedModel) {
+                        ctx.sendError('Selected chat model not found', conversationId);
+                        return;
+                    }
+                    await db.update(Conversation).set({ chatModelId }).where(eq(Conversation.id, conversationId));
+                }
+
+                const queuedMessage: QueuedMessage = { runId, clientMessageId, message: userQuery, chatModelId };
                 runHandle.queuedMessages.push(queuedMessage);
                 runHandle.stopMode = 'soft';
                 runHandle.stopReason = 'soft_interrupt';
@@ -77,7 +86,17 @@ export const MessageCommandHandler: Command<MessageCommand> = {
             const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
             conversation = results[0];
 
-            if (conversation?.chatModelId) {
+            if (chatModelId !== undefined) {
+                chatModelWithApi = await getChatModelById(chatModelId);
+                if (!chatModelWithApi) {
+                    ctx.sendError('Selected chat model not found', conversationId);
+                    return;
+                }
+                if (conversation) {
+                    await db.update(Conversation).set({ chatModelId }).where(eq(Conversation.id, conversationId));
+                    conversation.chatModelId = chatModelId;
+                }
+            } else if (conversation?.chatModelId) {
                 chatModelWithApi = await getChatModelById(conversation.chatModelId) ?? await getDefaultChatModel(user);
             } else {
                 chatModelWithApi = await getDefaultChatModel(user);
@@ -88,7 +107,15 @@ export const MessageCommandHandler: Command<MessageCommand> = {
                 conversation.chatModelId = chatModelWithApi.chatModel.id;
             }
         } else {
-            chatModelWithApi = await getDefaultChatModel(user);
+            if (chatModelId !== undefined) {
+                chatModelWithApi = await getChatModelById(chatModelId);
+                if (!chatModelWithApi) {
+                    ctx.sendError('Selected chat model not found');
+                    return;
+                }
+            } else {
+                chatModelWithApi = await getDefaultChatModel(user);
+            }
             const modelName = chatModelWithApi?.chatModel.name || 'unknown';
             conversation = await atifConversationService.createConversation(
                 user,
@@ -122,7 +149,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
             user,
             createEmptyPreferences(),
             userQuery,
-            conversation.chatModelId ?? undefined,
+            chatModelWithApi?.chatModel.id,
         );
         session.runState = createRunningState(runId, clientMessageId);
         sessions.set(conversation.id, session);

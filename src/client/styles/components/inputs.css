@@ -164,20 +164,36 @@
     position: absolute;
     bottom: calc(100% + 4px);
     left: 0;
-    min-width: 220px;
-    max-height: 300px;
+    min-width: 360px;
+    max-height: 440px;
     overflow-y: auto;
     background: var(--color-bg-elevated);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
     z-index: var(--z-dropdown);
+    padding: 4px 0;
+}
+
+.input-toolbar .model-tier-group + .model-tier-group {
+    margin-top: 4px;
+    border-top: 1px solid var(--color-border);
+    padding-top: 4px;
+}
+
+.input-toolbar .model-tier-header {
+    padding: 6px 12px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
 }
 
 .input-toolbar .model-option {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 2px;
     width: 100%;
     padding: 8px 12px;
     background: transparent;
@@ -194,11 +210,57 @@
 }
 
 .input-toolbar .model-option.selected {
-    background: var(--color-bg-muted);
+    background: var(--bg-active);
+    box-shadow: inset 3px 0 0 var(--color-brand);
+}
+
+.input-toolbar .model-option.selected .model-option-name {
+    font-weight: 600;
+}
+
+.input-toolbar .model-option-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.input-toolbar .model-option-row-secondary {
+    font-size: 12px;
+    color: var(--color-text-muted);
 }
 
 .input-toolbar .model-option-name {
     font-weight: 500;
+}
+
+.input-toolbar .model-recommended-pill {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--color-success-bg);
+    color: var(--color-success-text);
+}
+
+.input-toolbar .model-tagline {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.input-toolbar .model-cost-tier {
+    margin-left: auto;
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
 }
 
 .input-toolbar .model-dropdown-empty {

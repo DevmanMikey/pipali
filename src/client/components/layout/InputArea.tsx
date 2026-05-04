@@ -1,7 +1,7 @@
 // Message input area with model selector, file attachment, connection status, and send/stop controls
 
 import React, { useEffect, useRef } from 'react';
-import { ArrowUp, Square, Upload, X, FileText, FileSpreadsheet, File, Paperclip, ChevronDown, Check, Circle } from 'lucide-react';
+import { ArrowUp, Square, Upload, X, FileText, FileSpreadsheet, File, Paperclip, ChevronDown, Circle } from 'lucide-react';
 import type { ConfirmationRequest, ChatModelInfo } from '../../types';
 import type { StagedFile } from '../../hooks/useFileDrop';
 import { ConfirmationDialog } from '../confirmation/ConfirmationDialog';
@@ -131,9 +131,9 @@ export function InputArea({
                 <form onSubmit={(e) => {
                     // When confirmation is pending, send as guidance instead of new message
                     // This handles mobile where users tap the send button instead of pressing Enter
-                    if (pendingConfirmation && input.trim()) {
+                    if (pendingConfirmation && (input.trim() || hasFiles)) {
                         e.preventDefault();
-                        onConfirmationRespond('guidance', input.trim());
+                        onConfirmationRespond('guidance', input.trim() || undefined);
                         onInputChange('');
                         return;
                     }
@@ -183,9 +183,9 @@ export function InputArea({
                         }}
                         onKeyDown={(e) => {
                             // When confirmation is pending, Enter sends guidance
-                            if (pendingConfirmation && e.key === 'Enter' && !e.shiftKey && input.trim()) {
+                            if (pendingConfirmation && e.key === 'Enter' && !e.shiftKey && (input.trim() || hasFiles)) {
                                 e.preventDefault();
-                                onConfirmationRespond('guidance', input.trim());
+                                onConfirmationRespond('guidance', input.trim() || undefined);
                                 onInputChange('');
                                 return;
                             }
@@ -248,19 +248,54 @@ export function InputArea({
                                                 {t('inputArea.noModelsAvailable')}
                                             </div>
                                         ) : (
-                                            models.map(model => (
-                                                <button
-                                                    key={model.id}
-                                                    type="button"
-                                                    className={`model-option ${selectedModel?.id === model.id ? 'selected' : ''}`}
-                                                    onClick={() => onSelectModel(model)}
-                                                >
-                                                    <span className="model-option-name">
-                                                        {model.friendlyName || model.name}
-                                                    </span>
-                                                    {selectedModel?.id === model.id && <Check size={14} />}
-                                                </button>
-                                            ))
+                                            ([
+                                                ['flagship', t('inputArea.tierFlagship')],
+                                                ['balanced', t('inputArea.tierBalanced')],
+                                                ['lite', t('inputArea.tierLite')],
+                                                ['other', t('inputArea.tierOther')],
+                                            ] as const).map(([tierKey, tierLabel]) => {
+                                                const tierModels = models.filter(m =>
+                                                    tierKey === 'other'
+                                                        ? m.tier !== 'flagship' && m.tier !== 'balanced' && m.tier !== 'lite'
+                                                        : m.tier === tierKey
+                                                );
+                                                if (tierModels.length === 0) return null;
+                                                return (
+                                                    <div key={tierKey} className="model-tier-group">
+                                                        <div className="model-tier-header">{tierLabel}</div>
+                                                        {tierModels.map(model => {
+                                                            const isSelected = selectedModel?.id === model.id;
+                                                            return (
+                                                                <button
+                                                                    key={model.id}
+                                                                    type="button"
+                                                                    className={`model-option ${isSelected ? 'selected' : ''}`}
+                                                                    onClick={() => onSelectModel(model)}
+                                                                >
+                                                                    <div className="model-option-row">
+                                                                        <span className="model-option-name">
+                                                                            {model.friendlyName || model.name}
+                                                                        </span>
+                                                                        {model.recommended && (
+                                                                            <span className="model-recommended-pill">
+                                                                                {t('inputArea.recommended')}
+                                                                            </span>
+                                                                        )}
+                                                                        {model.costTier && <span className="model-cost-tier">{model.costTier}</span>}
+                                                                    </div>
+                                                                    {model.tagline && (
+                                                                        <div className="model-option-row model-option-row-secondary">
+                                                                            <span className="model-tagline" title={model.tagline}>
+                                                                                {model.tagline}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                );
+                                            })
                                         )}
                                     </div>
                                 )}

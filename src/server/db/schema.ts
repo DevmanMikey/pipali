@@ -143,6 +143,7 @@ export const AiModelApi = pgTable('ai_model_api', {
 });
 
 export const ChatModelTypeEnum = pgEnum('chat_model_type', ['openai', 'anthropic', 'google']);
+export const ChatModelTierEnum = pgEnum('chat_model_tier', ['flagship', 'balanced', 'lite']);
 
 export const ChatModel = pgTable('chat_model', {
     id: serial('id').primaryKey(),
@@ -159,6 +160,11 @@ export const ChatModel = pgTable('chat_model', {
     outputCostPerMillion: real('output_cost_per_million'),
     cacheReadCostPerMillion: real('cache_read_cost_per_million'),
     cacheWriteCostPerMillion: real('cache_write_cost_per_million'),
+    // App-facing categorization shown in the chat model selector.
+    tier: ChatModelTierEnum('tier'),
+    tagline: text('tagline'),
+    costTier: text('cost_tier'),
+    recommended: boolean('recommended').default(false).notNull(),
     ...dbBaseModel,
 });
 

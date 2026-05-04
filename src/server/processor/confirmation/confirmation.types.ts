@@ -117,8 +117,17 @@ export interface ConfirmationResponse {
     };
     /** Whether user chose to persist this preference */
     persistPreference?: boolean;
+    /** File attachments included with the user's response */
+    attachments?: ConfirmationResponseAttachment[];
     /** Timestamp of response */
     timestamp: string;
+}
+
+export interface ConfirmationResponseAttachment {
+    /** Absolute or app-accessible local path to the attached file */
+    path: string;
+    /** Display name shown for the attached file */
+    name?: string;
 }
 
 /**

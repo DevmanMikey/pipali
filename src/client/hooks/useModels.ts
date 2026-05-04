@@ -6,6 +6,7 @@ import { apiFetch } from '../utils/api';
 
 export function useModels() {
     const [models, setModels] = useState<ChatModelInfo[]>([]);
+    const [defaultModel, setDefaultModel] = useState<ChatModelInfo | null>(null);
     const [selectedModel, setSelectedModel] = useState<ChatModelInfo | null>(null);
     const [showModelDropdown, setShowModelDropdown] = useState(false);
 
@@ -26,9 +27,7 @@ export function useModels() {
             const res = await apiFetch('/api/user/model');
             if (res.ok) {
                 const data = await res.json();
-                if (data.model) {
-                    setSelectedModel(data.model);
-                }
+                setDefaultModel(data.model ?? null);
             }
         } catch (e) {
             console.error("Failed to fetch user model", e);
@@ -43,6 +42,7 @@ export function useModels() {
                 body: JSON.stringify({ modelId: model.id }),
             });
             if (res.ok) {
+                setDefaultModel(model);
                 setSelectedModel(model);
                 setShowModelDropdown(false);
             }
@@ -65,6 +65,7 @@ export function useModels() {
 
     return {
         models,
+        defaultModel,
         selectedModel,
         setSelectedModel,
         selectModel,

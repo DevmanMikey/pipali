@@ -12,6 +12,7 @@ import {
     type ConfirmationPreferences,
     type DiffInfo,
     type CommandExecutionInfo,
+    type ConfirmationResponseAttachment,
     CONFIRMATION_OPTIONS,
     createStandardConfirmationOptions,
 } from './confirmation.types';
@@ -153,6 +154,18 @@ export function requiresConfirmation(
     return !preferences.skipConfirmationFor.has(operationKey);
 }
 
+export function formatConfirmationAttachmentBlock(attachments?: ConfirmationResponseAttachment[]): string {
+    if (!attachments || attachments.length === 0) return '';
+
+    const paths = attachments
+        .map(attachment => attachment.path)
+        .filter(path => typeof path === 'string' && path.trim().length > 0);
+
+    if (paths.length === 0) return '';
+
+    return `\n\n<attached_files>\n${paths.map(path => `- ${path}`).join('\n')}\n</attached_files>`;
+}
+
 /**
  * Process a confirmation response and return the result
  */
@@ -167,10 +180,13 @@ export function processConfirmationResponse(
     // Build denial reason, including guidance if provided
     let denialReason: string | undefined;
     if (!approved) {
+        const attachmentBlock = formatConfirmationAttachmentBlock(response.attachments);
         if (response.selectedOptionId === CONFIRMATION_OPTIONS.GUIDANCE && response.guidance) {
-            denialReason = `User denied the operation with guidance: ${response.guidance}`;
+            denialReason = `User denied the operation with guidance: ${response.guidance}${attachmentBlock}`;
+        } else if (response.selectedOptionId === CONFIRMATION_OPTIONS.GUIDANCE && attachmentBlock) {
+            denialReason = `User denied the operation with attachments:${attachmentBlock}`;
         } else {
-            denialReason = 'User denied the operation';
+            denialReason = `User denied the operation${attachmentBlock}`;
         }
     }
 

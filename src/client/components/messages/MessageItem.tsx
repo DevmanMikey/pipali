@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Trash2, Paperclip } from 'lucide-react';
+import { Trash2, Paperclip, Clock } from 'lucide-react';
 import type { Message } from '../../types';
 import { ThoughtsSection } from '../thoughts/ThoughtsSection';
 import { StreamingIndicator } from './StreamingIndicator';
@@ -112,6 +112,14 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingC
                 <div className="message-attachments">
                     <Paperclip size={12} />
                     <span>{message.attachedFiles.join(', ')}</span>
+                </div>
+            )}
+
+            {/* Queued indicator: shown on user messages waiting behind an in-flight run. */}
+            {isUser && message.isQueued && (
+                <div className="message-queued">
+                    <Clock size={11} />
+                    <span>{t('messages.queued')}</span>
                 </div>
             )}
         </div>

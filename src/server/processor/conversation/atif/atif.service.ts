@@ -35,6 +35,7 @@ export interface ConversationWithTrajectory {
   userId: number;
   trajectory: ATIFTrajectory;
   title?: string | null;
+  chatModelId?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -329,6 +330,7 @@ export class ATIFConversationService {
     sourceConversationId: string,
     user: typeof User.$inferSelect,
     title?: string,
+    chatModelId?: number,
   ): Promise<ConversationWithTrajectory> {
     const sourceConversation = await this.getConversation(sourceConversationId);
 
@@ -357,6 +359,7 @@ export class ATIFConversationService {
       userId: number;
       trajectory: ATIFTrajectory;
       title?: string;
+      chatModelId?: number;
     } = {
       userId: user.id,
       trajectory: sanitizeForJsonb(newTrajectory),
@@ -364,6 +367,10 @@ export class ATIFConversationService {
 
     if (title) {
       insertData.title = title;
+    }
+    const forkChatModelId = chatModelId ?? sourceConversation.chatModelId ?? undefined;
+    if (forkChatModelId) {
+      insertData.chatModelId = forkChatModelId;
     }
 
     log.debug({

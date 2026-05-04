@@ -43,6 +43,27 @@
     flex-shrink: 0;
 }
 
+/* "Queued" pill on user messages waiting behind an in-flight run */
+.message-queued {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+    padding: 2px 8px;
+    border-radius: var(--radius-full, 9999px);
+    background: var(--color-bg-muted);
+    color: var(--color-text-muted);
+    font-size: 11px;
+    line-height: 1.4;
+    font-style: italic;
+}
+
+.message-queued svg {
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
 /* Assistant messages remain open/clean */
 .assistant-message {
     align-self: flex-start;

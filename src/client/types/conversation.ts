@@ -8,6 +8,7 @@ export type ConversationSummary = {
     preview: string;
     createdAt: string;
     updatedAt: string;
+    chatModelId?: number | null;
     isActive?: boolean;
     isAutomation?: boolean;
     isPinned?: boolean;

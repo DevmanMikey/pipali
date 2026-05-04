@@ -120,6 +120,13 @@
       "when": 1772786152089,
       "tag": "0016_military_ma_gnuci",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777631380949,
+      "tag": "0017_fancy_meteorite",
+      "breakpoints": true
     }
   ]
 }

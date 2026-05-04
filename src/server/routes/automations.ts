@@ -62,6 +62,10 @@ const confirmationResponseSchema = z.object({
     selectedOptionId: z.string(),
     persistPreference: z.boolean().optional(),
     guidance: z.string().optional(),
+    attachments: z.array(z.object({
+        path: z.string(),
+        name: z.string().optional(),
+    })).optional(),
 });
 
 // ============== STATIC ROUTES (must come before /:id routes) ==============
@@ -114,6 +118,7 @@ automations.post('/confirmations/:id/respond', zValidator('json', confirmationRe
         requestId: id,
         selectedOptionId: data.selectedOptionId,
         guidance: data.guidance,
+        attachments: data.attachments,
         persistPreference: data.persistPreference,
         timestamp: new Date().toISOString(),
     });

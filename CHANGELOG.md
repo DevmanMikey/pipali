@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.1
+
+### 🎁 New
+- Model selector now shows tier, tagline, and cost tier to help you choose the right model
+- Clear finished tasks from home page in one click with new bulk dismiss action
+- Attach files when answering confirmation questions and Pipali will receive them
+
+### 🧪 Improve
+- Home page no longer shows tasks you've already seen finish, only unseen completed tasks appear
+- Visually distinguish queued messages when sent mid-run
+- Pipali can fetch fresh webpage content for time-sensitive pages like news, prices, or status updates
+
+### 🛠️ Fix
+- Model shown in model selector always stays in sync when switch conversations
+
 ## 0.5.0
 
 ### 🎁 New

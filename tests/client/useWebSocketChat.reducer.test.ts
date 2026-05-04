@@ -198,3 +198,153 @@ test('STEP_START and COMPACTION use deterministic IDs to dedupe events replayed 
     expect(finalAssistant?.thoughts?.[0]?.content).toBe(reasoningText);
     expect(finalAssistant?.thoughts?.[1]?.content).toBe(compactionText);
 });
+
+test('OPTIMISTIC_RUN_STARTED during an in-flight run marks the user message queued and skips the assistant placeholder', () => {
+    const conversationId = 'c1';
+    const runningRunId = 'run-1';
+    const queuedClientMessageId = 'cm-2';
+    const queuedRunId = 'run-2';
+
+    const runningAssistant: Message = {
+        id: runningRunId,
+        stableId: runningRunId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        thoughts: [{ id: 't1', type: 'thought', content: 'thinking...' }],
+    };
+
+    const queuedUser: Message = {
+        id: queuedClientMessageId,
+        stableId: queuedClientMessageId,
+        role: 'user',
+        content: 'second question',
+    };
+
+    const state: ChatState = {
+        ...__test__.initialState,
+        conversationId,
+        messages: [runningAssistant, queuedUser],
+        conversationStates: new Map([[conversationId, {
+            isProcessing: true,
+            isStopped: false,
+            isCompleted: false,
+            messages: [runningAssistant, queuedUser],
+        }]]),
+        pendingConfirmations: new Map(),
+        runStatus: 'running',
+        currentRunId: runningRunId,
+    };
+
+    const next = __test__.chatReducer(state, {
+        type: 'OPTIMISTIC_RUN_STARTED',
+        conversationId,
+        runId: queuedRunId,
+        clientMessageId: queuedClientMessageId,
+    });
+
+    // No second assistant placeholder for queuedRunId — only the original streaming assistant remains.
+    const assistants = next.messages.filter(m => m.role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0]?.stableId).toBe(runningRunId);
+
+    // The queued user message is flagged.
+    const user = next.messages.find(m => m.stableId === queuedClientMessageId);
+    expect(user?.isQueued).toBe(true);
+
+    // currentRunId stays on the in-flight run (so stop targets the right run server-side).
+    expect(next.currentRunId).toBe(runningRunId);
+    expect(next.runStatus).toBe('running');
+});
+
+test('RUN_STARTED clears the isQueued flag on the matched user message and inserts the assistant placeholder', () => {
+    const conversationId = 'c1';
+    const queuedClientMessageId = 'cm-2';
+    const queuedRunId = 'run-2';
+
+    const queuedUser: Message = {
+        id: queuedClientMessageId,
+        stableId: queuedClientMessageId,
+        role: 'user',
+        content: 'second question',
+        isQueued: true,
+    };
+
+    const state: ChatState = {
+        ...__test__.initialState,
+        conversationId,
+        messages: [queuedUser],
+        conversationStates: new Map([[conversationId, {
+            isProcessing: false,
+            isStopped: false,
+            isCompleted: false,
+            messages: [queuedUser],
+        }]]),
+        pendingConfirmations: new Map(),
+    };
+
+    const next = __test__.chatReducer(state, {
+        type: 'RUN_STARTED',
+        conversationId,
+        runId: queuedRunId,
+        clientMessageId: queuedClientMessageId,
+    });
+
+    const user = next.messages.find(m => m.stableId === queuedClientMessageId);
+    expect(user?.isQueued).toBe(false);
+
+    // Assistant placeholder for the queued run is inserted right after the user message.
+    const userIdx = next.messages.findIndex(m => m.stableId === queuedClientMessageId);
+    expect(next.messages[userIdx + 1]?.role).toBe('assistant');
+    expect(next.messages[userIdx + 1]?.stableId).toBe(queuedRunId);
+});
+
+// Cover all reasons: error/disconnect leave the queue unrecoverable, same UX cleanup as user_stop.
+for (const reason of ['user_stop', 'error', 'disconnect'] as const) {
+    test(`RUN_STOPPED (${reason}) clears isQueued flags on user messages`, () => {
+        const conversationId = 'c1';
+        const runningRunId = 'run-1';
+
+        const runningAssistant: Message = {
+            id: runningRunId,
+            stableId: runningRunId,
+            role: 'assistant',
+            content: '',
+            isStreaming: true,
+            thoughts: [{ id: 't1', type: 'thought', content: 'thinking...' }],
+        };
+
+        const queuedUser: Message = {
+            id: 'cm-2',
+            stableId: 'cm-2',
+            role: 'user',
+            content: 'queued message',
+            isQueued: true,
+        };
+
+        const state: ChatState = {
+            ...__test__.initialState,
+            conversationId,
+            messages: [runningAssistant, queuedUser],
+            conversationStates: new Map([[conversationId, {
+                isProcessing: true,
+                isStopped: false,
+                isCompleted: false,
+                messages: [runningAssistant, queuedUser],
+            }]]),
+            pendingConfirmations: new Map(),
+            runStatus: 'running',
+            currentRunId: runningRunId,
+        };
+
+        const next = __test__.chatReducer(state, {
+            type: 'RUN_STOPPED',
+            conversationId,
+            runId: runningRunId,
+            reason,
+        });
+
+        const user = next.messages.find(m => m.stableId === 'cm-2');
+        expect(user?.isQueued).toBe(false);
+    });
+}

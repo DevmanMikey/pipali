@@ -17,7 +17,7 @@
  */
 
 import { useReducer, useRef, useCallback, useEffect } from 'react';
-import type { Message, Thought, ConversationState, ConfirmationRequest, BillingError, AuthError } from '../types';
+import type { Message, Thought, ConversationState, ConfirmationRequest, ConfirmationResponseAttachment, BillingError, AuthError } from '../types';
 import { acquireWakeLock, releaseWakeLock } from '../utils/tauri';
 import { formatToolCallsForSidebar, generateUUID, generateDeterministicId } from '../utils/formatting';
 import { trimHistoryTailAfterUser, mergeHistoryWithLive } from '../utils/chat-messages';
@@ -84,6 +84,7 @@ export interface SendMessageOptions {
     clientMessageId?: string;
     runId?: string;
     optimistic?: boolean;
+    chatModelId?: number;
 }
 
 export interface StopOptions {
@@ -195,6 +196,12 @@ function persistConversationStatesToStorage(conversationStates: Map<string, Conv
             const shouldPersist = state.isProcessing || state.isStopped || state.isCompleted;
             if (!shouldPersist) continue;
 
+            // Strip isQueued: a reload can't tell whether the server still has the message
+            // queued. RUN_STARTED will reinstate the placeholder if/when the run begins.
+            const persistedMessages = state.messages
+                .slice(-MAX_PERSISTED_MESSAGES_PER_CONVERSATION)
+                .map(m => (m.isQueued ? { ...m, isQueued: false } : m));
+
             entries.push([
                 conversationId,
                 {
@@ -202,7 +209,7 @@ function persistConversationStatesToStorage(conversationStates: Map<string, Conv
                     isStopped: state.isStopped,
                     isCompleted: state.isCompleted,
                     latestReasoning: state.latestReasoning,
-                    messages: state.messages.slice(-MAX_PERSISTED_MESSAGES_PER_CONVERSATION),
+                    messages: persistedMessages,
                 },
             ]);
         }
@@ -390,6 +397,22 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             const targetConversationId = conversationId ?? state.conversationId;
             const isCurrentConversation = targetConversationId === state.conversationId || (state.conversationId === undefined && !conversationId);
 
+            // Soft interrupt: a second streaming placeholder while one is already in flight
+            // produces two competing 3-dot animations. Flag the user message as queued instead.
+            const targetState = targetConversationId ? state.conversationStates.get(targetConversationId) : undefined;
+            const isSoftInterrupt = isCurrentConversation
+                ? state.runStatus === 'running'
+                : !!targetState?.isProcessing;
+
+            const markUserQueued = (msgs: Message[]): Message[] => {
+                return msgs.map(m => {
+                    if (m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId)) {
+                        return { ...m, isQueued: true };
+                    }
+                    return m;
+                });
+            };
+
             const insertAssistant = (msgs: Message[]): Message[] => {
                 if (findRunAssistantIndex(msgs, runId) !== -1) return msgs;
                 const assistant: Message = {
@@ -406,7 +429,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     : [...msgs.slice(0, userIndex + 1), assistant, ...msgs.slice(userIndex + 1)];
             };
 
-            const nextMessages = isCurrentConversation ? insertAssistant(state.messages) : state.messages;
+            const transform = isSoftInterrupt ? markUserQueued : insertAssistant;
+            const nextMessages = isCurrentConversation ? transform(state.messages) : state.messages;
 
             const conversationStates = new Map(state.conversationStates);
             if (targetConversationId) {
@@ -417,7 +441,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     isStopped: false,
                     isCompleted: false,
                     latestReasoning: existing?.latestReasoning,
-                    messages: isCurrentConversation ? nextMessages : insertAssistant(baseMessages),
+                    messages: isCurrentConversation ? nextMessages : transform(baseMessages),
                 });
             }
 
@@ -531,9 +555,19 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 };
 
                 const userIndex = messages.findIndex(m => m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId));
-                messages = userIndex === -1
-                    ? [...messages, assistant]
-                    : [...messages.slice(0, userIndex + 1), assistant, ...messages.slice(userIndex + 1)];
+                if (userIndex === -1) {
+                    messages = [...messages, assistant];
+                } else {
+                    // Clear any queued flag — the run for this user message has actually started.
+                    const userMsg = messages[userIndex]!;
+                    const clearedUser = userMsg.isQueued ? { ...userMsg, isQueued: false } : userMsg;
+                    messages = [
+                        ...messages.slice(0, userIndex),
+                        clearedUser,
+                        assistant,
+                        ...messages.slice(userIndex + 1),
+                    ];
+                }
             }
 
             conversationStates.set(conversationId, {
@@ -578,8 +612,14 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 });
             };
 
+            const clearQueuedFlags = (msgs: Message[]): Message[] => {
+                return msgs.map(m => (m.isQueued ? { ...m, isQueued: false } : m));
+            };
+
             const finalizeStopped = (msgs: Message[]): Message[] => {
-                const interrupted = markInterrupted(msgs);
+                // Clear isQueued for any reason: user_stop drops the queue, error/disconnect
+                // leave it in an unknown state. RUN_STARTED will reinstate if the server picks up.
+                const interrupted = clearQueuedFlags(markInterrupted(msgs));
                 // For user_stop, drop orphaned optimistic placeholders from queued messages
                 // that were cleared by the server. These are empty streaming assistants
                 // that will never receive a run_started from the server.
@@ -599,7 +639,10 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 conversationStates.set(conversationId, {
                     ...existing,
                     isProcessing: false,
-                    isStopped: reason === 'user_stop',
+                    // Only involuntary stops surface on home, and only if the user wasn't
+                    // viewing it. User-initiated stop acks can arrive after the user has
+                    // navigated home — exclude them outright to avoid a late re-surface.
+                    isStopped: (reason === 'disconnect' || reason === 'error') && !isCurrentConversation,
                     isCompleted: false,
                     messages: finalizeStopped(existing.messages),
                 });
@@ -686,7 +729,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     ...existing,
                     isProcessing: false,
                     isStopped: false,
-                    isCompleted: true,
+                    // If the user is viewing this conversation when it completes,
+                    // they've already seen the result — skip the home-page card.
+                    isCompleted: !isCurrentConversation,
                     messages: finalizeMessages(existing.messages),
                 });
             }
@@ -1622,6 +1667,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
             type: 'message',
             message: content,
             conversationId,
+            ...(options?.chatModelId !== undefined ? { chatModelId: options.chatModelId } : {}),
             clientMessageId,
             runId,
         }));
@@ -1660,7 +1706,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         runId: string,
         requestId: string,
         optionId: string,
-        guidance?: string
+        guidance?: string,
+        attachments?: ConfirmationResponseAttachment[]
     ) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
@@ -1674,12 +1721,13 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 requestId,
                 selectedOptionId: optionId,
                 guidance,
+                ...(attachments && attachments.length > 0 ? { attachments } : {}),
                 timestamp: new Date().toISOString(),
             },
         }));
     }, []);
 
-    const fork = useCallback((message: string, sourceConversationId: string, options?: { clientMessageId?: string; runId?: string }) => {
+    const fork = useCallback((message: string, sourceConversationId: string, options?: { clientMessageId?: string; runId?: string; chatModelId?: number }) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
         const clientMessageId = options?.clientMessageId ?? generateUUID();
@@ -1689,6 +1737,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
             type: 'fork',
             message,
             sourceConversationId,
+            ...(options?.chatModelId !== undefined ? { chatModelId: options.chatModelId } : {}),
             clientMessageId,
             runId,
         }));

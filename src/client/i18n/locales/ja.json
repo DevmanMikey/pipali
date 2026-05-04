@@ -76,7 +76,12 @@
         "noModelsAvailable": "利用可能なモデルがありません",
         "selectModel": "モデルを選択",
         "sendMessage": "メッセージを送信（ソフト割り込み）",
-        "stop": "停止 (Esc)"
+        "stop": "停止 (Esc)",
+        "tierFlagship": "フラッグシップ",
+        "tierBalanced": "バランス",
+        "tierLite": "ライト",
+        "tierOther": "その他",
+        "recommended": "おすすめ"
     },
     "home": {
         "greetings": {
@@ -157,7 +162,8 @@
         "backgroundTask": "バックグラウンドタスク",
         "untitled": "無題",
         "routine": "ルーティン",
-        "activeTasks": "進行中のタスク",
+        "activeTasks": "タスク",
+        "clearFinished": "終了したタスクを消去",
         "taskCount_one": "{{count}}件のタスク",
         "taskCount_other": "{{count}}件のタスク"
     },
@@ -509,6 +515,7 @@
     },
     "messages": {
         "deleteMessage": "メッセージを削除",
-        "pleaseLookAtFiles": "添付ファイルを確認してください。"
+        "pleaseLookAtFiles": "添付ファイルを確認してください。",
+        "queued": "キュー待ち"
     }
 }

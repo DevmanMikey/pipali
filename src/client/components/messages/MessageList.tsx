@@ -16,9 +16,10 @@ interface MessageListProps {
     onAuthSignIn?: (messageId: string) => void;
     onAuthDismiss?: (messageId: string) => void;
     userFirstName?: string;
+    hasInput?: boolean;
 }
 
-export function MessageList({ messages, conversationId, platformFrontendUrl, onDeleteMessage, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, userFirstName }: MessageListProps) {
+export function MessageList({ messages, conversationId, platformFrontendUrl, onDeleteMessage, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, userFirstName, hasInput }: MessageListProps) {
     const lastUserMessageRef = useRef<HTMLDivElement>(null);
     const mainContentRef = useRef<HTMLElement>(null);
     const messagesRef = useRef<HTMLDivElement>(null);
@@ -232,7 +233,7 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
         <main className="main-content" ref={mainContentRef}>
             <div className="messages-container">
                 {messages.length === 0 ? (
-                    <EmptyHomeState userFirstName={userFirstName} />
+                    <EmptyHomeState userFirstName={userFirstName} hasInput={hasInput} />
                 ) : (
                     <div className="messages" ref={messagesRef}>
                         {messages.map((msg, index) => (

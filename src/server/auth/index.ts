@@ -404,7 +404,7 @@ export async function syncPlatformModels(): Promise<void> {
         log.info('Syncing platform models...');
 
         // Fetch models from platform
-        const modelsUrl = `${platformUrl}/openai/v1/models`;
+        const modelsUrl = `${platformUrl}/models`;
         log.debug({ url: modelsUrl }, 'Fetching models from platform');
 
         const response = await fetch(modelsUrl, {
@@ -436,16 +436,18 @@ export async function syncPlatformModels(): Promise<void> {
         }
 
         const data = await response.json();
-        const platformModels = (data.data || []) as Array<{
+        const platformModels = (data.models || []) as Array<{
             id: string;
-            owned_by: string;
-            name?: string | null;
-            model_type?: 'openai' | 'anthropic' | 'google';
-            vision_enabled?: boolean;
-            use_responses_api?: boolean;
-            input_cost_per_million?: number;
-            output_cost_per_million?: number;
-            is_default?: boolean;
+            name: string;
+            modelType: 'openai' | 'anthropic' | 'google';
+            visionEnabled: boolean;
+            useResponsesApi: boolean;
+            inputCostPerMillion: number;
+            outputCostPerMillion: number;
+            tier: 'flagship' | 'balanced' | 'lite' | null;
+            tagline: string | null;
+            costTier: '$' | '$$' | '$$$';
+            recommended: boolean;
         }>;
 
         // Check if Pipali provider already exists
@@ -499,13 +501,16 @@ export async function syncPlatformModels(): Promise<void> {
         let addedCount = 0;
         let updatedCount = 0;
         for (const model of platformModels) {
-            // Use model_type from platform, fallback to detection if not provided
-            const modelType = model.model_type || detectModelType(model.id, model.owned_by);
-            const visionEnabled = model.vision_enabled ?? false;
-            const useResponsesApi = model.use_responses_api ?? false;
+            const modelType = model.modelType;
+            const visionEnabled = model.visionEnabled;
+            const useResponsesApi = model.useResponsesApi;
             const friendlyName = model.name || model.id;
-            const inputCostPerMillion = model.input_cost_per_million ?? null;
-            const outputCostPerMillion = model.output_cost_per_million ?? null;
+            const inputCostPerMillion = model.inputCostPerMillion ?? null;
+            const outputCostPerMillion = model.outputCostPerMillion ?? null;
+            const tier = model.tier;
+            const tagline = model.tagline;
+            const costTier = model.costTier;
+            const recommended = model.recommended;
 
             if (!existingModelNames.has(model.id)) {
                 await db.insert(ChatModel).values({
@@ -516,6 +521,10 @@ export async function syncPlatformModels(): Promise<void> {
                     useResponsesApi,
                     inputCostPerMillion,
                     outputCostPerMillion,
+                    tier,
+                    tagline,
+                    costTier,
+                    recommended,
                     aiModelApiId: providerId,
                 });
                 addedCount++;
@@ -523,14 +532,17 @@ export async function syncPlatformModels(): Promise<void> {
                 // Update existing model with latest platform values
                 const existingModel = existingModels.find(m => m.name === model.id);
                 if (existingModel) {
-                    // Check if any values have changed
                     const hasChanges =
                         existingModel.friendlyName !== friendlyName ||
                         existingModel.modelType !== modelType ||
                         existingModel.visionEnabled !== visionEnabled ||
                         existingModel.useResponsesApi !== useResponsesApi ||
                         existingModel.inputCostPerMillion !== inputCostPerMillion ||
-                        existingModel.outputCostPerMillion !== outputCostPerMillion;
+                        existingModel.outputCostPerMillion !== outputCostPerMillion ||
+                        existingModel.tier !== tier ||
+                        existingModel.tagline !== tagline ||
+                        existingModel.costTier !== costTier ||
+                        existingModel.recommended !== recommended;
 
                     if (hasChanges) {
                         await db.update(ChatModel)
@@ -541,6 +553,10 @@ export async function syncPlatformModels(): Promise<void> {
                                 useResponsesApi,
                                 inputCostPerMillion,
                                 outputCostPerMillion,
+                                tier,
+                                tagline,
+                                costTier,
+                                recommended,
                                 updatedAt: new Date()
                             })
                             .where(eq(ChatModel.id, existingModel.id));
@@ -570,7 +586,7 @@ export async function syncPlatformModels(): Promise<void> {
         }
 
         // Set platform's default model as the user's default if they haven't chosen one yet
-        const platformDefault = platformModels.find(m => m.is_default);
+        const platformDefault = platformModels.find(m => m.recommended);
         if (platformDefault) {
             const [user] = await db.select().from(User).limit(1);
             if (user) {
@@ -685,23 +701,6 @@ export async function syncPlatformWebTools(): Promise<void> {
     } catch (error) {
         log.error({ err: error }, 'Failed to sync platform web tools');
     }
-}
-
-/**
- * Detect the model type from model name or owner
- */
-function detectModelType(modelName: string, ownedBy: string): 'openai' | 'google' | 'anthropic' {
-    const name = modelName.toLowerCase();
-    const owner = ownedBy.toLowerCase();
-
-    if (name.includes('claude') || owner.includes('anthropic')) {
-        return 'anthropic';
-    }
-    if (name.includes('gemini') || owner.includes('google')) {
-        return 'google';
-    }
-    // Default to openai for GPT models and others
-    return 'openai';
 }
 
 /**
