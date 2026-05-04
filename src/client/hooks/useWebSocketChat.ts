@@ -819,11 +819,16 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 const existingThoughtIds = new Set((assistant.thoughts || []).map(t => t.id));
                 const dedupedNewThoughts = newThoughts.filter(t => !existingThoughtIds.has(t.id));
 
-                if (dedupedNewThoughts.length === 0) return msgs;
+                const shouldClearStreamedContent = !!reasoning && (toolCalls?.length ?? 0) > 0 && !!assistant.content;
+                if (dedupedNewThoughts.length === 0 && !shouldClearStreamedContent) return msgs;
 
                 return msgs.map((msg, i) => {
                     if (i !== idx) return msg;
-                    return { ...msg, thoughts: [...(msg.thoughts || []), ...dedupedNewThoughts] };
+                    return {
+                        ...msg,
+                        content: shouldClearStreamedContent ? '' : msg.content,
+                        thoughts: [...(msg.thoughts || []), ...dedupedNewThoughts],
+                    };
                 });
             };
 
