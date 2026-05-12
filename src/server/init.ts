@@ -1,5 +1,6 @@
+import OpenAI from 'openai';
 import { db } from './db';
-import { User, AiModelApi, ChatModel, McpServer } from './db/schema';
+import { User, AiModelApi, ChatModel, Conversation, McpServer } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getDefaultUser } from './utils';
 import { createChildLogger } from './logger';
@@ -10,29 +11,64 @@ const defaultGeminiModels = ['gemini-3-pro-preview', 'gemini-2.5-flash'];
 const defaultOpenAIModels = ['gpt-5.2'];
 const defaultAnthropicModels = ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'];
 
-async function setupChatModelProvider(providerName: string, modelType: 'openai' | 'google' | 'anthropic', apiKey: string, defaultModels: string[], visionEnabled: boolean, apiBaseUrl?: string) {
+async function setupChatModelProvider(providerName: string, modelType: 'openai' | 'google' | 'anthropic', apiKey: string, desiredModels: string[], visionEnabled: boolean, apiBaseUrl?: string) {
+    const baseUrl = apiBaseUrl ?? null;
     const [existingProvider] = await db.select().from(AiModelApi).where(eq(AiModelApi.name, providerName));
+
+    let providerId: number;
     if (existingProvider) {
-        log.info(`${providerName} provider already exists.`);
-        return;
+        if (existingProvider.apiKey !== apiKey || existingProvider.apiBaseUrl !== baseUrl) {
+            await db.update(AiModelApi)
+                .set({ apiKey, apiBaseUrl: baseUrl })
+                .where(eq(AiModelApi.id, existingProvider.id));
+            log.info(`🔄 Updated ${providerName} provider config.`);
+        }
+        providerId = existingProvider.id;
+    } else {
+        const [created] = await db.insert(AiModelApi).values({
+            name: providerName,
+            apiKey,
+            apiBaseUrl: baseUrl,
+        }).returning();
+        if (!created) throw new Error(`Failed to create ${providerName} provider.`);
+        providerId = created.id;
     }
 
-    const [apiProvider] = await db.insert(AiModelApi).values({
-        name: providerName,
-        apiKey: apiKey,
-        apiBaseUrl: apiBaseUrl,
-    }).returning();
+    // Reconcile this provider's model list against the desired set
+    const existingModels = await db.select().from(ChatModel).where(eq(ChatModel.aiModelApiId, providerId));
+    const existing = new Set(existingModels.map(m => m.name));
+    const desired = new Set(desiredModels);
 
-    for (const model of defaultModels) {
-        await db.insert(ChatModel).values({
-            name: model,
-            friendlyName: model,
-            modelType: modelType,
-            visionEnabled: visionEnabled,
-            aiModelApiId: apiProvider?.id,
-        });
+    const toAdd = desiredModels.filter(name => !existing.has(name));
+    for (const name of toAdd) {
+        await db.insert(ChatModel).values({ name, friendlyName: name, modelType, visionEnabled, aiModelApiId: providerId });
     }
-    log.info(`🤖 Added ${providerName} ai models.`);
+
+    const toRemove = existingModels.filter(m => !desired.has(m.name));
+    for (const model of toRemove) {
+        // Drop conversation references first (FK is no-action); agent and UserChatModel rows cascade
+        await db.update(Conversation).set({ chatModelId: null }).where(eq(Conversation.chatModelId, model.id));
+        await db.delete(ChatModel).where(eq(ChatModel.id, model.id));
+    }
+
+    if (toAdd.length > 0 || toRemove.length > 0) {
+        log.info(`🤖 ${providerName} models reconciled: +${toAdd.length} -${toRemove.length}.`);
+    }
+}
+
+/**
+ * Discover available models from an OpenAI-compatible /v1/models endpoint.
+ * Returns null on failure so callers can skip reconcile instead of nuking existing rows.
+ */
+async function listOpenAICompatibleModels(apiKey: string, apiBaseUrl?: string): Promise<string[] | null> {
+    try {
+        const client = new OpenAI({ apiKey, baseURL: apiBaseUrl ?? undefined, timeout: 6_000 });
+        const page = await client.models.list();
+        return page.data.length > 0 ? page.data.map(m => m.id) : null;
+    } catch (err) {
+        log.warn({ err: (err as Error).message, apiBaseUrl }, 'Failed to list models from OpenAI-compatible endpoint');
+        return null;
+    }
 }
 
 export async function initializeDatabase() {
@@ -49,19 +85,30 @@ export async function initializeDatabase() {
         });
     }
 
-    // 2. Create Chat Model Configurations - only if no chat models exist
-    const existingChatModels = await db.select().from(ChatModel).limit(1);
-
-    if (existingChatModels.length === 0) {
-        if (process.env.OPENAI_API_KEY && (!process.env.OPENAI_BASE_URL || process.env.OPENAI_BASE_URL == 'https://api.openai.com/v1')) {
-            await setupChatModelProvider('OpenAI', 'openai', process.env.OPENAI_API_KEY, defaultOpenAIModels, true, process.env.OPENAI_BASE_URL);
+    // 2. Reconcile env-var-driven chat model providers (re-runs on each boot so changes propagate)
+    if (process.env.OPENAI_API_KEY) {
+        const explicit = process.env.OPENAI_MODELS?.split(',').map(m => m.trim()).filter(Boolean);
+        // Precedence: OPENAI_MODELS > /v1/models discovery (custom endpoints only) > built-in defaults.
+        // Discovery failure returns null and we skip reconcile so a transient outage doesn't wipe existing rows.
+        let models: string[] | null;
+        if (explicit?.length) {
+            models = explicit;
+        } else if (process.env.OPENAI_BASE_URL) {
+            models = await listOpenAICompatibleModels(process.env.OPENAI_API_KEY, process.env.OPENAI_BASE_URL);
+        } else {
+            models = defaultOpenAIModels;
         }
-        if (process.env.GEMINI_API_KEY) {
-            await setupChatModelProvider('Google Gemini', 'google', process.env.GEMINI_API_KEY, defaultGeminiModels, true);
+        if (models) {
+            await setupChatModelProvider('OpenAI', 'openai', process.env.OPENAI_API_KEY, models, true, process.env.OPENAI_BASE_URL);
+        } else {
+            log.warn(`Skipping OpenAI provider reconcile: could not discover models from ${process.env.OPENAI_BASE_URL}. Set OPENAI_MODELS to override.`);
         }
-        if (process.env.ANTHROPIC_API_KEY) {
-            await setupChatModelProvider('Anthropic', 'anthropic', process.env.ANTHROPIC_API_KEY, defaultAnthropicModels, true);
-        }
+    }
+    if (process.env.GEMINI_API_KEY) {
+        await setupChatModelProvider('Google Gemini', 'google', process.env.GEMINI_API_KEY, defaultGeminiModels, true);
+    }
+    if (process.env.ANTHROPIC_API_KEY) {
+        await setupChatModelProvider('Anthropic', 'anthropic', process.env.ANTHROPIC_API_KEY, defaultAnthropicModels, true);
     }
 
     // 3. Setup default MCP servers
