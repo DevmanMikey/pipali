@@ -1,7 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { McpServerConfig, McpToolInfo, McpToolCallResult, McpClientStatus, McpContentType } from './types';
+import { DbMcpOAuthProvider } from './oauth-provider';
 import os from 'os';
 import path from 'path';
 import { createChildLogger } from '../../logger';
@@ -110,6 +112,11 @@ export function parseStdioCommand(path: string): { command: string; args: string
  */
 export function isHttpTransport(path: string): boolean {
     return path.startsWith('http://') || path.startsWith('https://');
+}
+
+export function isMcpOAuthUnauthorizedError(error: unknown): boolean {
+    return error instanceof UnauthorizedError
+        || (error instanceof Error && error.name === 'UnauthorizedError');
 }
 
 /**
@@ -234,13 +241,15 @@ async function getShellPath(): Promise<string | undefined> {
  */
 export class McpClient {
     private config: McpServerConfig;
+    private options: { oauthInteractive?: boolean; callbackOrigin?: string };
     private client: Client | null = null;
     private transport: StdioClientTransport | StreamableHTTPClientTransport | null = null;
     private tools: McpToolInfo[] = [];
     private _status: McpClientStatus = 'disconnected';
 
-    constructor(config: McpServerConfig) {
+    constructor(config: McpServerConfig, options: { oauthInteractive?: boolean; callbackOrigin?: string } = {}) {
         this.config = config;
+        this.options = options;
     }
 
     get status(): McpClientStatus {
@@ -336,9 +345,21 @@ export class McpClient {
      */
     private async connectHttp(): Promise<void> {
         const url = new URL(this.config.path);
+        const authType = this.config.authType ?? (this.config.apiKey ? 'bearer' : 'none');
+
+        if (authType === 'oauth') {
+            this.transport = new StreamableHTTPClientTransport(url, {
+                authProvider: new DbMcpOAuthProvider(this.config, {
+                    interactive: this.options.oauthInteractive,
+                    callbackOrigin: this.options.callbackOrigin,
+                }),
+            });
+            await this.client!.connect(this.transport);
+            return;
+        }
 
         const requestInit: RequestInit = {};
-        if (this.config.apiKey) {
+        if (authType === 'bearer' && this.config.apiKey) {
             requestInit.headers = {
                 'Authorization': `Bearer ${this.config.apiKey}`,
             };
@@ -436,6 +457,15 @@ export class McpClient {
                 error: errorMessage,
             };
         } catch (error) {
+            if (isMcpOAuthUnauthorizedError(error)) {
+                await this.close();
+                return {
+                    success: false,
+                    content: [],
+                    error: 'OAuth authorization is required. Reconnect this MCP server from the Tools page.',
+                    authRequired: true,
+                };
+            }
             let errorMsg = error instanceof Error ? error.message : String(error);
             // Preserve the cause chain (e.g., puppeteer wraps the real error in a generic message)
             if (error instanceof Error && error.cause) {

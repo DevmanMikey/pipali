@@ -276,6 +276,19 @@
     text-overflow: ellipsis;
 }
 
+.mcp-server-card-error {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.mcp-server-card-error svg {
+    flex-shrink: 0;
+    color: var(--color-error);
+}
+
 .mcp-server-card-footer {
     display: flex;
     align-items: center;
@@ -488,6 +501,10 @@
     gap: 8px;
 }
 
+.transport-type-selector.compact .transport-type-btn span {
+    white-space: nowrap;
+}
+
 .transport-type-selector.compact .transport-hint {
     display: none;
 }
@@ -598,6 +615,38 @@
     font-size: 12px;
     color: var(--color-text-muted);
     margin-top: 6px;
+}
+
+.mcp-oauth-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+}
+
+.mcp-oauth-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--color-text-secondary);
+}
+
+.mcp-oauth-status.connected {
+    color: var(--color-success-text);
+}
+
+.mcp-oauth-status.auth_required,
+.mcp-oauth-status.error {
+    color: var(--color-error-text);
+}
+
+.mcp-oauth-status.auth_pending {
+    color: var(--color-accent);
 }
 
 /* MCP Test Connection Section */

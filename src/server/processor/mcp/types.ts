@@ -49,6 +49,7 @@ export interface McpToolCallResult {
     success: boolean;
     content: McpContentType[];
     error?: string;
+    authRequired?: boolean;
 }
 
 /**

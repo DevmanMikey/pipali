@@ -1,4 +1,4 @@
-import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb, real, primaryKey, index } from 'drizzle-orm/pg-core';
+import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { type ATIFAgent, type ATIFFinalMetrics, type ATIFStep, type ATIFStepSource, type ATIFTrajectory } from '../processor/conversation/atif/atif.types';
 import { type TriggerConfig, type TriggerEventData } from '../automation/types';
 import { type ConfirmationRequest } from '../processor/confirmation/confirmation.types';
@@ -333,6 +333,8 @@ export const PendingConfirmation = pgTable('pending_confirmation', {
 
 // MCP Server Configuration Schema
 export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'http']);
+export const McpAuthTypeEnum = pgEnum('mcp_auth_type', ['none', 'bearer', 'oauth']);
+export const McpOAuthStatusEnum = pgEnum('mcp_oauth_status', ['not_connected', 'auth_pending', 'connected', 'auth_required', 'error']);
 
 /**
  * Confirmation mode for MCP server tool calls:
@@ -358,6 +360,10 @@ export const McpServer = pgTable('mcp_server', {
     // Optional API key for authenticated servers
     apiKey: text('api_key'),
 
+    // Authentication mode for HTTP-based MCP servers
+    authType: McpAuthTypeEnum('auth_type').default('none').notNull(),
+    oauthStatus: McpOAuthStatusEnum('oauth_status').default('not_connected').notNull(),
+
     // Optional environment variables to pass to stdio servers (JSON object)
     env: jsonb('env').$type<Record<string, string>>(),
 
@@ -378,6 +384,24 @@ export const McpServer = pgTable('mcp_server', {
 
     ...dbBaseModel,
 });
+
+// OAuth session and client registration state for HTTP-based MCP servers.
+// Secrets are kept separate from the server config so API responses can omit them.
+export const McpOAuthState = pgTable('mcp_oauth_state', {
+    id: serial('id').primaryKey(),
+    serverId: integer('server_id').notNull().references(() => McpServer.id, { onDelete: 'cascade' }),
+    authorizationServerUrl: text('authorization_server_url'),
+    resourceUrl: text('resource_url'),
+    scope: text('scope'),
+    state: text('state'),
+    codeVerifier: text('code_verifier'),
+    clientInformation: jsonb('client_information').$type<Record<string, unknown>>(),
+    tokens: jsonb('tokens').$type<Record<string, unknown>>(),
+    lastAuthorizationUrl: text('last_authorization_url'),
+    ...dbBaseModel,
+}, (table) => ({
+    serverIdUnique: uniqueIndex('mcp_oauth_state_server_id_unique').on(table.serverId),
+}));
 
 // Platform Authentication Token Storage
 // Stores tokens for authenticated sessions with the Pipali Platform

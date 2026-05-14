@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, Terminal, Globe, Plus, Trash2 } from 'lucide-react';
+import { X, Loader2, Terminal, Globe, Plus, Trash2, KeyRound, ShieldCheck, CircleSlash } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { McpTransportType, McpConfirmationMode, CreateMcpServerInput } from '../../types/mcp';
+import type { McpTransportType, McpConfirmationMode, McpAuthType, CreateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
 
 interface CreateMcpServerModalProps {
@@ -14,6 +14,7 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [transportType, setTransportType] = useState<McpTransportType>('stdio');
+    const [authType, setAuthType] = useState<McpAuthType>('none');
     const [path, setPath] = useState('');
     const [apiKey, setApiKey] = useState('');
     const [confirmationMode, setConfirmationMode] = useState<McpConfirmationMode>('always');
@@ -72,7 +73,8 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
             description: description || undefined,
             transportType,
             path,
-            apiKey: apiKey || undefined,
+            authType: transportType === 'http' ? authType : 'none',
+            apiKey: transportType === 'http' && authType === 'bearer' ? apiKey || undefined : undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
             confirmationMode,
         };
@@ -144,7 +146,10 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
                             <button
                                 type="button"
                                 className={`transport-type-btn ${transportType === 'stdio' ? 'active' : ''}`}
-                                onClick={() => setTransportType('stdio')}
+                                onClick={() => {
+                                    setTransportType('stdio');
+                                    setAuthType('none');
+                                }}
                             >
                                 <Terminal size={16} />
                                 <span>{t('mcpTools.stdio')}</span>
@@ -185,16 +190,53 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
                     </div>
 
                     {transportType === 'http' && (
-                        <div className="form-group">
-                            <label htmlFor="server-api-key">{t('mcpTools.apiKey')}</label>
-                            <input
-                                id="server-api-key"
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder={t('mcpTools.apiKeyPlaceholder')}
-                            />
-                        </div>
+                        <>
+                            <div className="form-group">
+                                <label>{t('mcpTools.authType')}</label>
+                                <div className="transport-type-selector compact">
+                                    <button
+                                        type="button"
+                                        className={`transport-type-btn ${authType === 'none' ? 'active' : ''}`}
+                                        onClick={() => setAuthType('none')}
+                                    >
+                                        <CircleSlash size={16} />
+                                        <span>{t('mcpTools.authNone')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`transport-type-btn ${authType === 'bearer' ? 'active' : ''}`}
+                                        onClick={() => setAuthType('bearer')}
+                                    >
+                                        <KeyRound size={16} />
+                                        <span>{t('mcpTools.authBearer')}</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={`transport-type-btn ${authType === 'oauth' ? 'active' : ''}`}
+                                        onClick={() => setAuthType('oauth')}
+                                    >
+                                        <ShieldCheck size={16} />
+                                        <span>{t('mcpTools.authOAuth')}</span>
+                                    </button>
+                                </div>
+                                <span className="form-hint">
+                                    {authType === 'oauth' ? t('mcpTools.authOAuthHint') : t('mcpTools.authTypeHint')}
+                                </span>
+                            </div>
+
+                            {authType === 'bearer' && (
+                                <div className="form-group">
+                                    <label htmlFor="server-api-key">{t('mcpTools.apiKey')}</label>
+                                    <input
+                                        id="server-api-key"
+                                        type="password"
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        placeholder={t('mcpTools.apiKeyPlaceholder')}
+                                    />
+                                </div>
+                            )}
+                        </>
                     )}
 
                     {transportType === 'stdio' && (

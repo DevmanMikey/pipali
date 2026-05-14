@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseStdioCommand, splitCommandLine, isHttpTransport } from '../../../src/server/processor/mcp/client';
+import { McpClient, parseStdioCommand, splitCommandLine, isHttpTransport } from '../../../src/server/processor/mcp/client';
 
 describe('MCP Client', () => {
     describe('splitCommandLine', () => {
@@ -63,5 +63,42 @@ describe('MCP Client', () => {
                 expect(result.args).toEqual(args);
             });
         }
+    });
+
+    describe('runTool', () => {
+        test('flags UnauthorizedError tool calls as auth-required', async () => {
+            const client = new McpClient({
+                id: 7,
+                name: 'oauth-server',
+                description: null,
+                transportType: 'http',
+                path: 'https://mcp.example.com/mcp',
+                apiKey: null,
+                authType: 'oauth',
+                oauthStatus: 'connected',
+                env: null,
+                confirmationMode: 'always',
+                enabled: true,
+                lastConnectedAt: null,
+                lastError: null,
+                enabledTools: null,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
+
+            (client as any).client = {
+                async callTool() {
+                    const error = new Error('Unauthorized');
+                    error.name = 'UnauthorizedError';
+                    throw error;
+                },
+            };
+
+            const result = await client.runTool('list_items', {});
+
+            expect(result.success).toBe(false);
+            expect(result.authRequired).toBe(true);
+            expect(result.error).toContain('OAuth authorization is required');
+        });
     });
 });
