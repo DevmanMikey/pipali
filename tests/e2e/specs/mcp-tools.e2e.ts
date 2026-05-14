@@ -74,10 +74,10 @@ test.describe('MCP Tools Page', () => {
 
             // Check both transport options are available
             const stdioBtn = mcpToolsPage.transportTypeSelector.locator('button:has-text("stdio")');
-            const sseBtn = mcpToolsPage.transportTypeSelector.locator('button:has-text("HTTP/SSE")');
+            const httpBtn = mcpToolsPage.transportTypeSelector.locator('button:has-text("HTTP")');
 
             await expect(stdioBtn).toBeVisible();
-            await expect(sseBtn).toBeVisible();
+            await expect(httpBtn).toBeVisible();
         });
 
         test('should create a new stdio server', async ({ page }) => {
@@ -101,14 +101,14 @@ test.describe('MCP Tools Page', () => {
             await mcpToolsPage.deleteServerByNameViaAPI(serverName);
         });
 
-        test('should create a new SSE server', async ({ page }) => {
-            const serverName = `test-sse-${Date.now()}`;
+        test('should create a new HTTP server', async ({ page }) => {
+            const serverName = `test-http-${Date.now()}`;
 
             await mcpToolsPage.openCreateModal();
             await mcpToolsPage.fillCreateForm({
                 name: serverName,
-                description: 'A test SSE MCP server',
-                transportType: 'sse',
+                description: 'A test HTTP MCP server',
+                transportType: 'http',
                 // Local refused port fails fast and avoids long external network timeouts.
                 path: 'http://127.0.0.1:1/mcp',
             });
@@ -356,7 +356,7 @@ test.describe('MCP Tools Page', () => {
                 data: {
                     name: serverName,
                     description: 'Server with card toggle',
-                    transportType: 'sse',
+                    transportType: 'http',
                     path: 'http://127.0.0.1:1/mcp',
                     enabled: true,
                 },

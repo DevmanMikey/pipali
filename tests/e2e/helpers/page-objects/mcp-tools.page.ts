@@ -169,7 +169,7 @@ export class McpToolsPage {
     async fillCreateForm(options: {
         name: string;
         description?: string;
-        transportType: 'stdio' | 'sse';
+        transportType: 'stdio' | 'http';
         path: string;
         apiKey?: string;
         requiresConfirmation?: boolean;
@@ -182,13 +182,13 @@ export class McpToolsPage {
 
         // Select transport type
         const transportBtn = this.transportTypeSelector.locator(
-            `button:has-text("${options.transportType === 'stdio' ? 'stdio' : 'HTTP/SSE'}")`
+            `button:has-text("${options.transportType === 'stdio' ? 'stdio' : 'HTTP'}")`
         );
         await transportBtn.click();
 
         await this.serverPathInput.fill(options.path);
 
-        if (options.transportType === 'sse' && options.apiKey) {
+        if (options.transportType === 'http' && options.apiKey) {
             await this.serverApiKeyInput.fill(options.apiKey);
         }
     }
@@ -377,7 +377,7 @@ export class McpToolsPage {
     async createServerViaAPI(options: {
         name: string;
         description?: string;
-        transportType: 'stdio' | 'sse';
+        transportType: 'stdio' | 'http';
         path: string;
         apiKey?: string;
         requiresConfirmation?: boolean;

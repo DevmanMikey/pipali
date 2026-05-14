@@ -269,11 +269,11 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                                 </button>
                                 <button
                                     type="button"
-                                    className={`transport-type-btn ${transportType === 'sse' ? 'active' : ''}`}
-                                    onClick={() => setTransportType('sse')}
+                                    className={`transport-type-btn ${transportType === 'http' ? 'active' : ''}`}
+                                    onClick={() => setTransportType('http')}
                                 >
                                     <Globe size={16} />
-                                    <span>{t('mcpTools.httpSse')}</span>
+                                    <span>{t('mcpTools.http')}</span>
                                 </button>
                             </div>
                         </div>
@@ -290,7 +290,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                             />
                         </div>
 
-                        {transportType === 'sse' && (
+                        {transportType === 'http' && (
                             <div className="form-group">
                                 <label htmlFor="server-api-key">{t('mcpTools.apiKey')}</label>
                                 <input

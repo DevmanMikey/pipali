@@ -22,7 +22,7 @@ const mcp = new Hono();
 const createMcpServerSchema = z.object({
     name: z.string().min(1).max(64).regex(/^[a-z0-9_-]+$/, 'Name must be lowercase alphanumeric with dashes/underscores'),
     description: z.string().max(512).optional(),
-    transportType: z.enum(['stdio', 'sse']),
+    transportType: z.enum(['stdio', 'http']),
     path: z.string().min(1),
     apiKey: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),

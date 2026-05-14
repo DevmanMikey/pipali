@@ -332,7 +332,7 @@ export const PendingConfirmation = pgTable('pending_confirmation', {
 });
 
 // MCP Server Configuration Schema
-export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'sse']);
+export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'http']);
 
 /**
  * Confirmation mode for MCP server tool calls:
@@ -352,7 +352,7 @@ export const McpServer = pgTable('mcp_server', {
     // Connection configuration
     transportType: McpTransportTypeEnum('transport_type').notNull(),
     // For stdio: path to script (.py/.js) or npm package name (@scope/package)
-    // For SSE: HTTP/HTTPS URL endpoint
+    // For HTTP: HTTPS URL endpoint
     path: text('path').notNull(),
 
     // Optional API key for authenticated servers

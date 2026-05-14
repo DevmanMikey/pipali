@@ -1,4 +1,4 @@
-export type McpTransportType = 'stdio' | 'sse';
+export type McpTransportType = 'stdio' | 'http';
 
 export type McpConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 

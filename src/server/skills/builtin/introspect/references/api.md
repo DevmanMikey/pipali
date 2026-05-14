@@ -77,8 +77,8 @@ Use curl via `shell_command` or equivalent tools. Use `execution_mode: "direct"`
 ```
 
 - `name`: lowercase alphanumeric with dashes/underscores
-- `transportType`: `"stdio"` or `"sse"`
-- `path`: command to run (stdio) or URL (sse). The command is called with bunx/uvx/no prefix, auto-inferred
+- `transportType`: `"stdio"` or `"http"`
+- `path`: command to run (stdio) or URL (http). The command is called with bunx/uvx/no prefix, auto-inferred
 - `confirmationMode`: `"always"` (default), `"unsafe_only"`, or `"never"`
 - `enabledTools`: optional whitelist of tool names. Omit to enable all
 

@@ -134,6 +134,13 @@
       "when": 1777927070932,
       "tag": "0018_salty_firebrand",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778762000000,
+      "tag": "0019_mcp_transport_http",
+      "breakpoints": true
     }
   ]
 }
