@@ -11,6 +11,68 @@ import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'edit_file' });
 
+const editQueues = new Map<string, Promise<void>>();
+
+interface ResolvedEditPath {
+    resolvedPath: string;
+    queuePath: string;
+}
+
+function getEditQueueKey(filePath: string): string {
+    const normalized = path.normalize(filePath);
+    return process.platform === 'darwin' || process.platform === 'win32'
+        ? normalized.toLowerCase()
+        : normalized;
+}
+
+async function runWithFileEditQueue<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+    const queueKey = getEditQueueKey(filePath);
+    const previous = editQueues.get(queueKey) ?? Promise.resolve();
+
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const queued = previous.then(() => current, () => current);
+    editQueues.set(queueKey, queued);
+
+    await previous.catch(() => undefined);
+
+    try {
+        return await operation();
+    } finally {
+        release();
+        if (editQueues.get(queueKey) === queued) {
+            editQueues.delete(queueKey);
+        }
+    }
+}
+
+async function resolveEditPath(absolutePath: string): Promise<ResolvedEditPath | null> {
+    let resolvedPath = absolutePath;
+    let exists = await Bun.file(resolvedPath).exists();
+
+    if (!exists) {
+        const caseResolved = await resolveCaseInsensitivePath(path.normalize(absolutePath));
+        if (caseResolved) {
+            resolvedPath = caseResolved;
+            exists = await Bun.file(resolvedPath).exists();
+        }
+    }
+
+    if (!exists) return null;
+
+    let queuePath = resolvedPath;
+    try {
+        queuePath = await fs.realpath(resolvedPath);
+    } catch {
+        // The existence check above is the user-facing validation. If realpath
+        // fails after that, fall back to the resolved path for queueing.
+    }
+
+    return { resolvedPath, queuePath };
+}
+
 /**
  * Arguments for the edit_file tool.
  */
@@ -101,22 +163,8 @@ export async function editFile(
             ? file_path
             : path.resolve(os.homedir(), file_path);
 
-        // Check if file exists
-        let resolvedPath = absolutePath;
-        let file = Bun.file(resolvedPath);
-        let exists = await file.exists();
-
-        // If the exact-cased path doesn't exist, try resolving case-insensitively
-        if (!exists) {
-            const caseResolved = await resolveCaseInsensitivePath(path.normalize(absolutePath));
-            if (caseResolved) {
-                resolvedPath = caseResolved;
-                file = Bun.file(resolvedPath);
-                exists = await file.exists();
-            }
-        }
-
-        if (!exists) {
+        const resolved = await resolveEditPath(absolutePath);
+        if (!resolved) {
             return {
                 query,
                 file: file_path,
@@ -125,89 +173,12 @@ export async function editFile(
             };
         }
 
-        // Read the file content
-        const content = await file.text();
-
-        // Check if old_string exists in the file
-        if (!content.includes(old_string)) {
-            return {
-                query,
-                file: file_path,
-                uri: file_path,
-                compiled: `Error: old_string not found in file. Make sure you're using the exact text from the file.`,
-            };
-        }
-
-        // Count occurrences of old_string
-        const occurrences = content.split(old_string).length - 1;
-
-        // If not replace_all and there are multiple occurrences, error out
-        if (!replace_all && occurrences > 1) {
-            return {
-                query,
-                file: file_path,
-                uri: file_path,
-                compiled: `Error: old_string is not unique in the file (found ${occurrences} occurrences). Either provide a larger string with more surrounding context to make it unique, or set replace_all to true to replace all occurrences.`,
-            };
-        }
-
-        // Perform the replacement
-        let newContent: string;
-        if (replace_all) {
-            newContent = content.split(old_string).join(new_string);
-        } else {
-            // Replace only the first occurrence
-            const index = content.indexOf(old_string);
-            newContent = content.slice(0, index) + new_string + content.slice(index + old_string.length);
-        }
-
-        // Check if path is within allowed write directories (skip confirmation if so)
-        const skipConfirmation = isPathWithinAllowedWrite(resolvedPath);
-
-        // Request user confirmation if:
-        // 1. Path is NOT within allowed write directories, AND
-        // 2. Confirmation context is provided
-        if (!skipConfirmation && options?.confirmationContext) {
-            const confirmResult = await requestOperationConfirmation(
-                'edit_file',
-                file_path,
-                options.confirmationContext,
-                {
-                    toolName: 'edit_file',
-                    toolArgs: { file_path, old_string, new_string, replace_all },
-                    additionalMessage: `This will replace ${occurrences} occurrence${occurrences > 1 ? 's' : ''} of the specified text.`,
-                    diff: {
-                        filePath: file_path,
-                        oldText: old_string,
-                        newText: new_string,
-                    },
-                }
-            );
-
-            if (!confirmResult.approved) {
-                return {
-                    query,
-                    file: file_path,
-                    uri: file_path,
-                    compiled: `Operation cancelled: ${confirmResult.denialReason || 'User denied the edit operation'}`,
-                };
-            }
-        }
-
-        // Write the file back
-        await fs.writeFile(resolvedPath, newContent, 'utf-8');
-
-        const replacementCount = replace_all ? occurrences : 1;
-        const message = `Successfully replaced ${replacementCount} occurrence${replacementCount > 1 ? 's' : ''} in ${file_path}`;
-
-        log.debug({ file: file_path, replacements: replacementCount }, message);
-
-        return {
+        return await runWithFileEditQueue(resolved.queuePath, () => editResolvedFile(
+            args,
+            options,
             query,
-            file: file_path,
-            uri: file_path,
-            compiled: message,
-        };
+            resolved.resolvedPath,
+        ));
     } catch (error) {
         const errorMsg = `Error editing file ${file_path}: ${error instanceof Error ? error.message : String(error)}`;
         log.error({ err: error }, errorMsg);
@@ -219,4 +190,92 @@ export async function editFile(
             compiled: errorMsg,
         };
     }
+}
+
+async function editResolvedFile(
+    args: EditFileArgs,
+    options: EditFileOptions | undefined,
+    query: string,
+    resolvedPath: string,
+): Promise<EditFileResult> {
+    const { file_path, old_string, new_string, replace_all = false } = args;
+    const file = Bun.file(resolvedPath);
+
+    if (!await file.exists()) {
+        return {
+            query,
+            file: file_path,
+            uri: file_path,
+            compiled: `Error: File '${file_path}' not found`,
+        };
+    }
+
+    const content = await file.text();
+    if (!content.includes(old_string)) {
+        return {
+            query,
+            file: file_path,
+            uri: file_path,
+            compiled: `Error: old_string not found in file. Make sure you're using the exact text from the file.`,
+        };
+    }
+
+    const occurrences = content.split(old_string).length - 1;
+    if (!replace_all && occurrences > 1) {
+        return {
+            query,
+            file: file_path,
+            uri: file_path,
+            compiled: `Error: old_string is not unique in the file (found ${occurrences} occurrences). Either provide a larger string with more surrounding context to make it unique, or set replace_all to true to replace all occurrences.`,
+        };
+    }
+
+    let newContent: string;
+    if (replace_all) {
+        newContent = content.split(old_string).join(new_string);
+    } else {
+        const index = content.indexOf(old_string);
+        newContent = content.slice(0, index) + new_string + content.slice(index + old_string.length);
+    }
+
+    if (!isPathWithinAllowedWrite(resolvedPath) && options?.confirmationContext) {
+        const confirmResult = await requestOperationConfirmation(
+            'edit_file',
+            file_path,
+            options.confirmationContext,
+            {
+                toolName: 'edit_file',
+                toolArgs: { file_path, old_string, new_string, replace_all },
+                additionalMessage: `This will replace ${occurrences} occurrence${occurrences > 1 ? 's' : ''} of the specified text.`,
+                diff: {
+                    filePath: file_path,
+                    oldText: old_string,
+                    newText: new_string,
+                },
+            }
+        );
+
+        if (!confirmResult.approved) {
+            return {
+                query,
+                file: file_path,
+                uri: file_path,
+                compiled: `Operation cancelled: ${confirmResult.denialReason || 'User denied the edit operation'}`,
+            };
+        }
+    }
+
+    await fs.writeFile(resolvedPath, newContent, 'utf-8');
+
+    const replacementCount = replace_all ? occurrences : 1;
+    const message = `Successfully replaced ${replacementCount} occurrence${replacementCount > 1 ? 's' : ''} in ${file_path}`;
+
+    log.debug({ file: file_path, replacements: replacementCount }, message);
+
+    return {
+        query,
+        file: file_path,
+        uri: file_path,
+        compiled: message,
+    };
 }
