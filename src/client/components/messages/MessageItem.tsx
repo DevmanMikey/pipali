@@ -15,6 +15,7 @@ import { safeMarkdownUrlTransform, localImageSrc } from '../../utils/markdown';
 import { getApiBaseUrl } from '../../utils/api';
 import { BillingMessage } from '../billing';
 import { AuthErrorMessage } from '../auth';
+import { RunErrorMessage } from './RunErrorMessage';
 
 interface MessageItemProps {
     message: Message;
@@ -24,9 +25,10 @@ interface MessageItemProps {
     onBillingDismiss?: (messageId: string) => void;
     onAuthSignIn?: (messageId: string) => void;
     onAuthDismiss?: (messageId: string) => void;
+    onRunErrorDismiss?: (messageId: string) => void;
 }
 
-export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss }: MessageItemProps) {
+export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, onRunErrorDismiss }: MessageItemProps) {
     const { t } = useTranslation();
     const isUser = message.role === 'user';
     const [isHovered, setIsHovered] = useState(false);
@@ -55,6 +57,17 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingC
                 <AuthErrorMessage
                     onSignIn={() => onAuthSignIn?.(message.id)}
                     onDismiss={onAuthDismiss ? () => onAuthDismiss(message.id) : undefined}
+                />
+            </div>
+        );
+    }
+
+    if (message.runErrorInfo) {
+        return (
+            <div className="message assistant-message">
+                <RunErrorMessage
+                    message={message.runErrorInfo.message}
+                    onDismiss={onRunErrorDismiss ? () => onRunErrorDismiss(message.id) : undefined}
                 />
             </div>
         );

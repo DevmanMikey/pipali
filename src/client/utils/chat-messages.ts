@@ -43,6 +43,7 @@ export function shouldPreserveLiveMessage(msg: Message): boolean {
     // Billing/auth/errors etc aren't persisted
     if (msg.billingInfo) return true;
     if (msg.authInfo) return true;
+    if (msg.runErrorInfo) return true;
     // Keep in-progress streaming placeholders
     if (msg.isStreaming) return true;
     // Keep run-based assistant messages that have content (completed but not yet

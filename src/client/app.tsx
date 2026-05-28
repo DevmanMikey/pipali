@@ -292,12 +292,7 @@ const App = () => {
             }
         },
         onError: (error, convId) => {
-            if (convId && convId === conversationIdRef.current) {
-                const errMsgId = generateUUID();
-                const next = [...messagesRef.current, { id: errMsgId, stableId: errMsgId, role: 'assistant' as const, content: `Error: ${error}` }];
-                setChatMessages(next);
-                syncConversationState(convId, next);
-            }
+            console.warn("Run error:", { error, conversationId: convId });
         },
     });
 
@@ -1350,6 +1345,12 @@ const App = () => {
         await handleLogout();
     };
 
+    const handleRunErrorDismiss = (messageId: string) => {
+        const next = messages.filter(m => m.id !== messageId);
+        setChatMessages(next);
+        if (conversationId) syncConversationState(conversationId, next);
+    };
+
     // ===== Message Sending =====
 
     const getStagedConfirmationAttachments = (): ConfirmationResponseAttachment[] | undefined => {
@@ -1669,7 +1670,7 @@ const App = () => {
                     )}
                     {currentPage === 'chat' && (
                         <ErrorBoundary>
-                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} />
+                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} />
                         </ErrorBoundary>
                     )}
 

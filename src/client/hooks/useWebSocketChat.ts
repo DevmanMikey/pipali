@@ -269,6 +269,32 @@ function dropEmptyStreamingPlaceholders(messages: Message[], keepRunId?: string)
     return next.length === messages.length ? messages : next;
 }
 
+function appendRunErrorMessage(messages: Message[], runId: string, error: string): Message[] {
+    const messageId = `run-error-${runId}`;
+    if (messages.some(m => m.stableId === messageId)) return messages;
+
+    return [
+        ...messages,
+        {
+            id: messageId,
+            stableId: messageId,
+            role: 'assistant' as const,
+            content: '',
+            runErrorInfo: { message: error },
+        },
+    ];
+}
+
+function dropEmptyAssistantForRun(messages: Message[], runId: string): Message[] {
+    return messages.filter(m => {
+        if (m.role !== 'assistant' || m.stableId !== runId) return true;
+        const hasContent = (m.content ?? '').trim().length > 0;
+        const hasThoughts = (m.thoughts?.length ?? 0) > 0;
+        const hasSpecialContent = !!m.billingInfo || !!m.authInfo || !!m.runErrorInfo;
+        return hasContent || hasThoughts || hasSpecialContent;
+    });
+}
+
 function deleteTurnFromMessages(messages: Message[], stepId: number): Message[] {
     const idx = messages.findIndex(m => m.role === 'user' && m.id === String(stepId));
     if (idx === -1) return messages;
@@ -587,7 +613,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         }
 
         case 'RUN_STOPPED': {
-            const { conversationId, runId, reason } = action;
+            const { conversationId, runId, reason, error } = action;
             const isCurrentConversation = conversationId === state.conversationId;
 
             // Mark pending tool calls as interrupted
@@ -632,6 +658,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 return interrupted;
             };
 
+            const finalizeRunError = (msgs: Message[]): Message[] => {
+                if (reason !== 'error' || !error) return finalizeStopped(msgs);
+                const finalized = dropEmptyAssistantForRun(finalizeStopped(msgs), runId);
+                return appendRunErrorMessage(finalized, runId, error);
+            };
+
             const conversationStates = new Map(state.conversationStates);
             const existing = conversationStates.get(conversationId);
             if (existing) {
@@ -643,7 +675,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     // navigated home — exclude them outright to avoid a late re-surface.
                     isStopped: (reason === 'disconnect' || reason === 'error') && !isCurrentConversation,
                     isCompleted: false,
-                    messages: finalizeStopped(existing.messages),
+                    messages: finalizeRunError(existing.messages),
                 });
             }
 
@@ -659,7 +691,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 ...state,
                 runStatus: isCurrentConversation ? 'stopped' : state.runStatus,
                 currentRunId: isCurrentConversation ? undefined : state.currentRunId,
-                messages: isCurrentConversation ? finalizeStopped(state.messages) : state.messages,
+                messages: isCurrentConversation ? finalizeRunError(state.messages) : state.messages,
                 conversationStates,
                 pendingConfirmations,
             };

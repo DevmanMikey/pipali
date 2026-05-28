@@ -15,11 +15,12 @@ interface MessageListProps {
     onBillingDismiss?: (messageId: string) => void;
     onAuthSignIn?: (messageId: string) => void;
     onAuthDismiss?: (messageId: string) => void;
+    onRunErrorDismiss?: (messageId: string) => void;
     userFirstName?: string;
     hasInput?: boolean;
 }
 
-export function MessageList({ messages, conversationId, platformFrontendUrl, onDeleteMessage, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, userFirstName, hasInput }: MessageListProps) {
+export function MessageList({ messages, conversationId, platformFrontendUrl, onDeleteMessage, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, onRunErrorDismiss, userFirstName, hasInput }: MessageListProps) {
     const lastUserMessageRef = useRef<HTMLDivElement>(null);
     const mainContentRef = useRef<HTMLElement>(null);
     const messagesRef = useRef<HTMLDivElement>(null);
@@ -245,7 +246,7 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
                                     else messageRefsMap.current.delete(index);
                                 }}
                             >
-                                <MessageItem message={msg} platformFrontendUrl={platformFrontendUrl} onDelete={onDeleteMessage} onBillingContinue={onBillingContinue} onBillingDismiss={onBillingDismiss} onAuthSignIn={onAuthSignIn} onAuthDismiss={onAuthDismiss} />
+                                <MessageItem message={msg} platformFrontendUrl={platformFrontendUrl} onDelete={onDeleteMessage} onBillingContinue={onBillingContinue} onBillingDismiss={onBillingDismiss} onAuthSignIn={onAuthSignIn} onAuthDismiss={onAuthDismiss} onRunErrorDismiss={onRunErrorDismiss} />
                             </div>
                         ))}
                     </div>
