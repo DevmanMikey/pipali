@@ -25,6 +25,40 @@ import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'director' });
 
+function getPlatformRecoverableByModel(error: unknown): boolean | undefined {
+    const candidates = [
+        (error as { error?: unknown })?.error,
+        (error as { body?: { error?: unknown } })?.body?.error,
+        (error as { response?: { error?: unknown } })?.response?.error,
+    ];
+
+    for (const candidate of candidates) {
+        if (candidate && typeof candidate === 'object' && 'recoverable_by_model' in candidate) {
+            const value = candidate.recoverable_by_model;
+            if (typeof value === 'boolean') return value;
+        }
+    }
+
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : undefined;
+    if (!message) return undefined;
+
+    const jsonStart = message.indexOf('{');
+    if (jsonStart === -1) return undefined;
+
+    try {
+        const parsed = JSON.parse(message.slice(jsonStart)) as { error?: { recoverable_by_model?: unknown } };
+        return typeof parsed.error?.recoverable_by_model === 'boolean'
+            ? parsed.error.recoverable_by_model
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function isNonRecoverablePlatformModelError(error: unknown): boolean {
+    return getPlatformRecoverableByModel(error) === false;
+}
+
 /** Maximum characters for tool output text content before truncation */
 export const MAX_TOOL_OUTPUT_CHARS = 100_000;
 
@@ -654,8 +688,8 @@ async function pickNextTool(
             compactionSummary: response.compactionSummary,
         };
     } catch (error) {
-        // Re-throw billing/auth errors so they can be handled by the caller (ws.ts)
-        if (error instanceof PlatformBillingError || error instanceof PlatformAuthError) {
+        // Re-throw platform errors that should be handled by the caller instead of fed back to the model.
+        if (error instanceof PlatformBillingError || error instanceof PlatformAuthError || isNonRecoverablePlatformModelError(error)) {
             throw error;
         }
         log.error({ err: error }, 'Failed to pick next tool');
