@@ -1,6 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import { McpClient, parseStdioCommand, splitCommandLine, isHttpTransport } from '../../../src/server/processor/mcp/client';
 
+const httpOAuthServer = {
+    id: 7,
+    name: 'oauth-server',
+    description: null,
+    transportType: 'http' as const,
+    path: 'https://mcp.example.com/mcp',
+    apiKey: null,
+    authType: 'oauth' as const,
+    oauthStatus: 'connected' as const,
+    env: null,
+    confirmationMode: 'always' as const,
+    enabled: true,
+    lastConnectedAt: null,
+    lastError: null,
+    enabledTools: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+};
+
 describe('MCP Client', () => {
     describe('splitCommandLine', () => {
         const cases = [
@@ -67,24 +86,7 @@ describe('MCP Client', () => {
 
     describe('runTool', () => {
         test('flags UnauthorizedError tool calls as auth-required', async () => {
-            const client = new McpClient({
-                id: 7,
-                name: 'oauth-server',
-                description: null,
-                transportType: 'http',
-                path: 'https://mcp.example.com/mcp',
-                apiKey: null,
-                authType: 'oauth',
-                oauthStatus: 'connected',
-                env: null,
-                confirmationMode: 'always',
-                enabled: true,
-                lastConnectedAt: null,
-                lastError: null,
-                enabledTools: null,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-            });
+            const client = new McpClient(httpOAuthServer);
 
             (client as any).client = {
                 async callTool() {
@@ -99,6 +101,123 @@ describe('MCP Client', () => {
             expect(result.success).toBe(false);
             expect(result.authRequired).toBe(true);
             expect(result.error).toContain('OAuth authorization is required');
+        });
+
+        // These exercise the real reconnect()/retry logic in McpClient. Only the
+        // network seam — connect(), which would open a real socket — is stubbed;
+        // the teardown, single-retry, and concurrent-reconnect coalescing all run.
+        const sessionError = () => Object.assign(
+            new Error('Streamable HTTP error: Error POSTing to endpoint: {"error":{"code":-32000,"message":"No transport found for sessionId"}}'),
+            { code: 404 }
+        );
+
+        test('reconnects and retries once on an expired Streamable HTTP session', async () => {
+            const client = new McpClient(httpOAuthServer);
+            let calls = 0;
+
+            // Server forgets the session: first call 404s. A real reconnect()
+            // re-initializes (here, our connect() stub swaps in a healthy session).
+            (client as any).client = {
+                async callTool() {
+                    calls++;
+                    throw sessionError();
+                },
+            };
+            let connects = 0;
+            (client as any).connect = async () => {
+                connects++;
+                (client as any)._status = 'connected';
+                (client as any).client = {
+                    async callTool() {
+                        calls++;
+                        return { content: [{ type: 'text', text: 'ok' }] };
+                    },
+                };
+            };
+
+            const result = await client.runTool('list_items', {});
+
+            expect(connects).toBe(1);   // real reconnect() ran exactly one connect
+            expect(calls).toBe(2);      // failed once, retried once after reconnect
+            expect(result.success).toBe(true);
+            expect(result.content).toEqual([{ type: 'text', text: 'ok' }]);
+        });
+
+        test('does not loop when the session error persists after reconnect', async () => {
+            const client = new McpClient(httpOAuthServer);
+            let calls = 0;
+
+            // Every call keeps 404-ing even after reconnect (connect re-establishes
+            // a session that's still broken). Must retry once, then give up.
+            const failingClient = {
+                async callTool() {
+                    calls++;
+                    throw sessionError();
+                },
+            };
+            let connects = 0;
+            (client as any).client = failingClient;
+            (client as any).connect = async () => {
+                connects++;
+                (client as any)._status = 'connected';
+                (client as any).client = failingClient; // real connect() always sets this.client
+            };
+
+            const result = await client.runTool('list_items', {});
+
+            expect(connects).toBe(1); // reconnect attempted exactly once, no loop
+            expect(calls).toBe(2);    // original attempt + single retry
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('No transport found for sessionId');
+        });
+
+        test('coalesces concurrent reconnects into a single handshake', async () => {
+            const client = new McpClient(httpOAuthServer);
+            let healthy = false;
+
+            const sessionClient = {
+                async callTool() {
+                    if (!healthy) throw sessionError();
+                    return { content: [{ type: 'text', text: 'ok' }] };
+                },
+            };
+            let connects = 0;
+            (client as any).client = sessionClient;
+            (client as any).connect = async () => {
+                connects++;
+                // Yield so the second in-flight call reaches reconnect() while this
+                // handshake is still pending — exercising the coalescing guard.
+                await Promise.resolve();
+                healthy = true;
+                (client as any)._status = 'connected';
+                (client as any).client = sessionClient; // real connect() always sets this.client
+            };
+
+            const [a, b] = await Promise.all([
+                client.runTool('list_items', {}),
+                client.runTool('list_items', {}),
+            ]);
+
+            expect(connects).toBe(1); // both expired calls shared one reconnect
+            expect(a.success).toBe(true);
+            expect(b.success).toBe(true);
+        });
+
+        test('leaves non-session errors untouched (no reconnect)', async () => {
+            const client = new McpClient(httpOAuthServer);
+            let connects = 0;
+            (client as any).connect = async () => { connects++; };
+            (client as any).client = {
+                async callTool() {
+                    throw new Error('Tool blew up for an unrelated reason');
+                },
+            };
+
+            const result = await client.runTool('list_items', {});
+
+            expect(connects).toBe(0); // a generic failure must not trigger reconnect
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Tool blew up for an unrelated reason');
         });
     });
 });

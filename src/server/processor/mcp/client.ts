@@ -120,6 +120,28 @@ export function isMcpOAuthUnauthorizedError(error: unknown): boolean {
 }
 
 /**
+ * Detect a dropped Streamable HTTP session: the server no longer recognizes the
+ * `mcp-session-id` we replay (idle eviction, server restart, or a load-balanced
+ * instance that never held it). Per the MCP spec a server returns HTTP 404 for a
+ * request bearing an unknown/terminated session id; implementations word the body
+ * differently, so we also match the common phrasings. The fix is to re-initialize
+ * a fresh session and retry, not to reuse the dead id.
+ */
+export function isMcpSessionExpiredError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    const codes = [(error as { code?: unknown }).code, (error.cause as { code?: unknown } | undefined)?.code];
+    if (codes.includes(404)) {
+        return true;
+    }
+    const cause = error.cause instanceof Error ? error.cause.message : '';
+    return /no transport found for session|session (?:not found|expired|has expired)|invalid session id/i.test(
+        `${error.message} ${cause}`
+    );
+}
+
+/**
  * Resolve a `bun x <package>` call to a vendored binary in the server resource
  * node_modules. Returns null if the package isn't vendored.
  */
@@ -246,6 +268,7 @@ export class McpClient {
     private transport: StdioClientTransport | StreamableHTTPClientTransport | null = null;
     private tools: McpToolInfo[] = [];
     private _status: McpClientStatus = 'disconnected';
+    private reconnecting: Promise<void> | null = null;
 
     constructor(config: McpServerConfig, options: { oauthInteractive?: boolean; callbackOrigin?: string } = {}) {
         this.config = config;
@@ -404,81 +427,148 @@ export class McpClient {
     }
 
     /**
-     * Execute a tool by its original (non-namespaced) name
+     * Execute a tool by its original (non-namespaced) name.
+     * Recovers transparently from a dropped Streamable HTTP session by
+     * re-initializing once and retrying. See {@link isMcpSessionExpiredError}.
      */
     async runTool(toolName: string, args: Record<string, unknown>): Promise<McpToolCallResult> {
         if (!this.client) {
             throw new Error('Client not connected');
         }
+        return this.runToolAttempt(toolName, args, true);
+    }
 
+    private async runToolAttempt(
+        toolName: string,
+        args: Record<string, unknown>,
+        allowReconnect: boolean
+    ): Promise<McpToolCallResult> {
         try {
-            const result = await this.client.callTool({
+            const result = await this.client!.callTool({
                 name: toolName,
                 arguments: args,
             });
-
-            // Process content based on type
-            const content: McpContentType[] = [];
-
-            if ('content' in result && Array.isArray(result.content)) {
-                for (const item of result.content) {
-                    if (item.type === 'text') {
-                        content.push({ type: 'text', text: item.text });
-                    } else if (item.type === 'image') {
-                        content.push({
-                            type: 'image',
-                            data: item.data,
-                            mimeType: item.mimeType,
-                        });
-                    } else if (item.type === 'audio') {
-                        content.push({
-                            type: 'audio',
-                            data: item.data,
-                            mimeType: item.mimeType,
-                        });
-                    }
-                }
-            }
-
-            const isError = 'isError' in result && result.isError;
-
-            // Extract error message from content if this is an error response
-            let errorMessage: string | undefined;
-            if (isError && content.length > 0) {
-                const textContent = content.filter(item => item.type === 'text');
-                if (textContent.length > 0) {
-                    errorMessage = textContent.map(item => (item as { type: 'text'; text: string }).text).join('\n');
-                }
-            }
-
-            return {
-                success: !isError,
-                content,
-                error: errorMessage,
-            };
+            return this.processToolResult(result);
         } catch (error) {
             if (isMcpOAuthUnauthorizedError(error)) {
                 await this.close();
-                return {
-                    success: false,
-                    content: [],
-                    error: 'OAuth authorization is required. Reconnect this MCP server from the Tools page.',
-                    authRequired: true,
-                };
+                return this.authRequiredResult();
             }
-            let errorMsg = error instanceof Error ? error.message : String(error);
-            // Preserve the cause chain (e.g., puppeteer wraps the real error in a generic message)
-            if (error instanceof Error && error.cause) {
-                const cause = error.cause instanceof Error ? error.cause.message : String(error.cause);
-                errorMsg += `\nCause: ${cause}`;
+
+            // The server forgot our Streamable HTTP session. Re-initialize a fresh
+            // session once (OAuth tokens are persisted, so this is transparent) and
+            // retry — reusing the dead session id would just 404 again.
+            if (allowReconnect && isHttpTransport(this.config.path) && isMcpSessionExpiredError(error)) {
+                log.info({ tool: toolName, server: this.config.name }, 'MCP Streamable HTTP session expired; reconnecting and retrying');
+                try {
+                    await this.reconnect();
+                } catch (reconnectError) {
+                    if (isMcpOAuthUnauthorizedError(reconnectError)) {
+                        await this.close();
+                        return this.authRequiredResult();
+                    }
+                    // Reconnect failed for another reason — report the original failure.
+                    return this.formatToolError(error, toolName);
+                }
+                return this.runToolAttempt(toolName, args, false);
             }
-            log.error({ err: error, tool: toolName, server: this.config.name }, 'MCP tool execution failed');
-            return {
-                success: false,
-                content: [],
-                error: errorMsg,
-            };
+
+            return this.formatToolError(error, toolName);
         }
+    }
+
+    private processToolResult(result: Awaited<ReturnType<Client['callTool']>>): McpToolCallResult {
+        // Process content based on type
+        const content: McpContentType[] = [];
+
+        if ('content' in result && Array.isArray(result.content)) {
+            for (const item of result.content) {
+                if (item.type === 'text') {
+                    content.push({ type: 'text', text: item.text });
+                } else if (item.type === 'image') {
+                    content.push({
+                        type: 'image',
+                        data: item.data,
+                        mimeType: item.mimeType,
+                    });
+                } else if (item.type === 'audio') {
+                    content.push({
+                        type: 'audio',
+                        data: item.data,
+                        mimeType: item.mimeType,
+                    });
+                }
+            }
+        }
+
+        const isError = 'isError' in result && result.isError;
+
+        // Extract error message from content if this is an error response
+        let errorMessage: string | undefined;
+        if (isError && content.length > 0) {
+            const textContent = content.filter(item => item.type === 'text');
+            if (textContent.length > 0) {
+                errorMessage = textContent.map(item => (item as { type: 'text'; text: string }).text).join('\n');
+            }
+        }
+
+        return {
+            success: !isError,
+            content,
+            error: errorMessage,
+        };
+    }
+
+    private formatToolError(error: unknown, toolName: string): McpToolCallResult {
+        let errorMsg = error instanceof Error ? error.message : String(error);
+        // Preserve the cause chain (e.g., puppeteer wraps the real error in a generic message)
+        if (error instanceof Error && error.cause) {
+            const cause = error.cause instanceof Error ? error.cause.message : String(error.cause);
+            errorMsg += `\nCause: ${cause}`;
+        }
+        log.error({ err: error, tool: toolName, server: this.config.name }, 'MCP tool execution failed');
+        return {
+            success: false,
+            content: [],
+            error: errorMsg,
+        };
+    }
+
+    private authRequiredResult(): McpToolCallResult {
+        return {
+            success: false,
+            content: [],
+            error: 'OAuth authorization is required. Reconnect this MCP server from the Tools page.',
+            authRequired: true,
+        };
+    }
+
+    /**
+     * Tear down the current transport and establish a fresh connection (and
+     * Streamable HTTP session). Concurrent callers share a single handshake so
+     * parallel tool calls hitting the same expired session don't race.
+     */
+    private async reconnect(): Promise<void> {
+        if (!this.reconnecting) {
+            this.reconnecting = (async () => {
+                try {
+                    if (this.transport) {
+                        try {
+                            await this.transport.close();
+                        } catch {
+                            // Transport may already be gone; proceed to reconnect.
+                        }
+                    }
+                    this.client = null;
+                    this.transport = null;
+                    this._status = 'disconnected';
+                    await this.connect();
+                } finally {
+                    this.reconnecting = null;
+                }
+            })();
+        }
+        return this.reconnecting;
     }
 
     /**
