@@ -1,5 +1,32 @@
 # Contributing to Pipali
 
+Thanks for your interest in improving Pipali! To keep the project maintainable, we follow a lightweight process. Reading this first will save everyone time — including you.
+
+## Contribution Process
+
+**Work from a triaged issue — don't open a PR against an un-reviewed or declined one.**
+
+1. **Find or open an issue.** Use the [issue templates](https://github.com/khoj-ai/pipali/issues/new/choose) — Bug Report, Feature Request, or Question. For usage and how-to questions, use the **Question** template rather than a bug or feature issue.
+2. **Wait for triage.** New issues start with the `triage` label. A maintainer reviews each one and either **accepts it** (removes the `triage` label) or **declines it** (closes the issue). An open issue with no `triage` label is accepted and ready to work on.
+3. **Open a pull request** linking the triaged issue (`Closes #123`). First PR wins — *unless the issue is assigned to someone*, in which case it's reserved for them, so please don't open a competing PR. To claim an issue and avoid duplicate effort, comment to say you're working on it.
+
+> **Pull requests against an untriaged (`triage`-labelled) or closed issue may be closed without review.** This isn't about gatekeeping — it's about not having you invest hours in a change we can't accept. A two-line issue we can decline in a minute is far kinder than a large PR we have to reject.
+
+Good first contributions are labelled [`good first issue`](https://github.com/khoj-ai/pipali/labels/good%20first%20issue) and [`help wanted`](https://github.com/khoj-ai/pipali/labels/help%20wanted) — these are pre-approved, so you can start right away (comment to claim one first).
+
+### What we tend to accept
+
+- Bug fixes with a clear reproduction.
+- Changes that resolve a triaged, accepted issue.
+- Focused PRs that do one thing well.
+- Useful, visual explanations like diagrams and screenshots of the issue or feature.
+
+### What tends to get declined
+
+- Large unsolicited PRs with no prior discussion.
+- Sweeping refactors, formatting-only changes, or dependency bumps without a motivating issue.
+- Changes that expand scope beyond the linked issue.
+
 ## Development Setup
 
 ### Prerequisites

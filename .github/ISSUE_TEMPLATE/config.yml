@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Contributing Guide
+    url: https://github.com/khoj-ai/pipali/blob/main/CONTRIBUTING.md
+    about: Read this before opening a pull request — code changes require a triaged issue first.

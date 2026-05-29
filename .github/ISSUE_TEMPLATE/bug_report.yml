@@ -1,0 +1,63 @@
+name: 🐛 Bug Report
+description: Report something that is broken or behaving incorrectly
+labels: ["fix", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. A clear, reproducible report is the single biggest thing that gets a fix shipped quickly.
+
+        Before filing, please [search existing issues](https://github.com/khoj-ai/pipali/issues?q=is%3Aissue) — yours may already be tracked.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected to happen instead.
+      placeholder: When I do X, Pipali does Y. I expected Z.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, numbered steps that reliably trigger the bug. Issues without reproducible steps are likely to be closed.
+      placeholder: |
+        1. Start the app
+        2. Open a conversation and ask "..."
+        3. Observe the error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pipali app version
+      description: Click your profile (avatar and name) at the bottom of the left sidebar, then read the version badge (e.g. v0.5.2) on the right of the "What's New" row.
+      placeholder: "0.5.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Not Applicable
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste server/console output or attach screenshots. This will be formatted as code automatically.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

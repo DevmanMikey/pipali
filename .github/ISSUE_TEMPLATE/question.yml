@@ -1,0 +1,48 @@
+name: ❓ Question / Help
+description: Ask a usage, setup, or how-to question
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for usage and setup questions — not bug reports or feature proposals. Please [search existing issues](https://github.com/khoj-ai/pipali/issues?q=is%3Aissue) first; your question may already be answered.
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+      description: Describe what you're trying to do and where you got stuck.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Steps you've already taken, docs you've read, or things that didn't work.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Pipali app version
+      description: Click your profile (avatar and name) at the bottom of the left sidebar, then read the version badge (e.g. v0.5.2) on the right of the "What's New" row. Enter "N/A" if it isn't relevant to your question.
+      placeholder: "0.5.2"
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Not Applicable
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this question hasn't been answered.
+          required: true
