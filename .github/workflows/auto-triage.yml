@@ -1,0 +1,42 @@
+name: auto-triage
+
+# Ensures every new issue that represents PR-able work starts gated with the `triage`
+# label, regardless of how it was created. Issue forms auto-apply `triage`, but issues
+# opened via the API or `gh issue create` bypass templates and would otherwise arrive
+# unlabelled — which, under our "no triage label = accepted" contribution gate, would
+# falsely read as ready to work on. This closes that gap.
+#
+# Questions are excluded: nobody opens a PR against a question, so they are tracked by
+# the `question` label + open/closed state, not the contribution gate. See CONTRIBUTING.md.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  add-triage-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add triage label if missing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.issue.labels.map(l => l.name);
+            if (labels.includes('triage')) {
+              core.info('Issue already has the triage label; nothing to do.');
+              return;
+            }
+            if (labels.includes('question')) {
+              core.info('Question issue; not subject to the contribution gate.');
+              return;
+            }
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: ['triage'],
+            });
+            core.info('Added triage label to issue #' + context.payload.issue.number);

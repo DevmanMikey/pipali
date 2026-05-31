@@ -292,12 +292,7 @@ const App = () => {
             }
         },
         onError: (error, convId) => {
-            if (convId && convId === conversationIdRef.current) {
-                const errMsgId = generateUUID();
-                const next = [...messagesRef.current, { id: errMsgId, stableId: errMsgId, role: 'assistant' as const, content: `Error: ${error}` }];
-                setChatMessages(next);
-                syncConversationState(convId, next);
-            }
+            console.warn("Run error:", { error, conversationId: convId });
         },
     });
 
@@ -880,6 +875,9 @@ const App = () => {
                     }
                     let toolResultsMap: Map<string, string> = new Map();
                     const hasMessage = msg.message && msg.message.trim() !== '';
+                    const stepGroupId = msg.tool_calls && msg.tool_calls.length > 0
+                        ? (msg.step_id != null ? String(msg.step_id) : msg.tool_calls[0]?.tool_call_id || generateUUID())
+                        : undefined;
 
                     if (msg.reasoning_content) {
                         thoughts.push({
@@ -887,6 +885,7 @@ const App = () => {
                             content: msg.reasoning_content,
                             id: generateDeterministicId('thought', msg.reasoning_content),
                             isInternalThought: true,
+                            stepGroupId,
                         });
                     }
 
@@ -907,6 +906,7 @@ const App = () => {
                                 type: 'thought',
                                 content: msg.message,
                                 id: generateDeterministicId('thought', msg.message),
+                                stepGroupId,
                             });
                         }
                         for (const tc of msg.tool_calls) {
@@ -917,6 +917,7 @@ const App = () => {
                                 toolResult: toolResultsMap.get(tc.tool_call_id),
                                 content: '',
                                 id: tc.tool_call_id,
+                                stepGroupId,
                             });
                         }
                     } else if (hasMessage) {
@@ -1344,6 +1345,12 @@ const App = () => {
         await handleLogout();
     };
 
+    const handleRunErrorDismiss = (messageId: string) => {
+        const next = messages.filter(m => m.id !== messageId);
+        setChatMessages(next);
+        if (conversationId) syncConversationState(conversationId, next);
+    };
+
     // ===== Message Sending =====
 
     const getStagedConfirmationAttachments = (): ConfirmationResponseAttachment[] | undefined => {
@@ -1663,7 +1670,7 @@ const App = () => {
                     )}
                     {currentPage === 'chat' && (
                         <ErrorBoundary>
-                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} />
+                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} />
                         </ErrorBoundary>
                     )}
 

@@ -97,7 +97,7 @@
 }
 
 .trail-icon--pending {
-    animation: pulse-pending 1s ease-in-out infinite;
+    animation: none;
 }
 
 .trail-group-count {
@@ -116,26 +116,13 @@
     margin-top: 12px;
     padding-left: 8px;
     border-left: 2px solid var(--color-border);
-    min-height: 240px;
-    max-height: 240px;
+    min-height: 0;
+    max-height: 96px;
     overflow-y: auto;
 }
 
 .thoughts-preview .thought-item {
     padding-left: 12px;
-}
-
-.thoughts-preview .thought-step {
-    animation: pulse-step 1s ease-in-out infinite;
-}
-
-@keyframes pulse-step {
-    0%, 100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.4;
-    }
 }
 
 .thoughts-list {
@@ -1199,4 +1186,3 @@
     color: var(--color-accent);
     border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
-

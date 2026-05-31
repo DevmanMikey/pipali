@@ -27,7 +27,6 @@ export class McpToolsPage {
     readonly serverApiKeyInput: Locator;
     readonly transportTypeSelector: Locator;
     readonly confirmationCheckbox: Locator;
-    readonly enabledCheckbox: Locator;
 
     // Detail modal elements
     readonly detailModal: Locator;
@@ -69,7 +68,6 @@ export class McpToolsPage {
         this.serverApiKeyInput = page.locator('#server-api-key');
         this.transportTypeSelector = page.locator('.transport-type-selector');
         this.confirmationCheckbox = page.locator('#confirmation-mode');
-        this.enabledCheckbox = page.locator('input[type="checkbox"]').first(); // Only checkbox is for enabled
 
         // Detail modal
         this.detailModal = page.locator('.mcp-server-detail-modal');
@@ -137,6 +135,27 @@ export class McpToolsPage {
     }
 
     /**
+     * Get server card enable toggle by server name
+     */
+    getServerToggleByName(name: string): Locator {
+        return this.getServerCardByName(name).locator('.mcp-card-toggle-switch input');
+    }
+
+    /**
+     * Get visible server card enable switch by server name
+     */
+    getServerToggleSwitchByName(name: string): Locator {
+        return this.getServerCardByName(name).locator('.mcp-card-toggle-switch');
+    }
+
+    /**
+     * Toggle server enabled state from the card
+     */
+    async toggleServerFromCard(serverName: string): Promise<void> {
+        await this.getServerToggleSwitchByName(serverName).click();
+    }
+
+    /**
      * Open create modal
      */
     async openCreateModal(): Promise<void> {
@@ -146,16 +165,14 @@ export class McpToolsPage {
 
     /**
      * Fill create form
-     * Note: enabled defaults to false in tests to prevent npm install attempts for non-existent packages
      */
     async fillCreateForm(options: {
         name: string;
         description?: string;
-        transportType: 'stdio' | 'sse';
+        transportType: 'stdio' | 'http';
         path: string;
         apiKey?: string;
         requiresConfirmation?: boolean;
-        enabled?: boolean;
     }): Promise<void> {
         await this.serverNameInput.fill(options.name);
 
@@ -165,23 +182,14 @@ export class McpToolsPage {
 
         // Select transport type
         const transportBtn = this.transportTypeSelector.locator(
-            `button:has-text("${options.transportType === 'stdio' ? 'stdio' : 'HTTP/SSE'}")`
+            `button:has-text("${options.transportType === 'stdio' ? 'stdio' : 'HTTP'}")`
         );
         await transportBtn.click();
 
         await this.serverPathInput.fill(options.path);
 
-        if (options.transportType === 'sse' && options.apiKey) {
+        if (options.transportType === 'http' && options.apiKey) {
             await this.serverApiKeyInput.fill(options.apiKey);
-        }
-
-        // Disable server by default in tests to prevent connection attempts
-        // The enabled checkbox is checked by default, so we need to uncheck it
-        if (options.enabled === false || options.enabled === undefined) {
-            const isChecked = await this.enabledCheckbox.isChecked();
-            if (isChecked) {
-                await this.enabledCheckbox.click();
-            }
         }
     }
 
@@ -369,7 +377,7 @@ export class McpToolsPage {
     async createServerViaAPI(options: {
         name: string;
         description?: string;
-        transportType: 'stdio' | 'sse';
+        transportType: 'stdio' | 'http';
         path: string;
         apiKey?: string;
         requiresConfirmation?: boolean;

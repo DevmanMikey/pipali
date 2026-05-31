@@ -6,8 +6,8 @@ import { cors } from 'hono/cors';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { db, getDefaultChatModel } from '../db';
-import { Automation, Conversation } from '../db/schema';
-import { eq, desc, isNull, and, sql } from 'drizzle-orm';
+import { Automation, Conversation, ConversationStep } from '../db/schema';
+import { asc, eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { AiModelApi, ChatModel, User, UserChatModel } from '../db/schema';
 import openapi from './openapi';
 import automations from './automations';
@@ -172,8 +172,7 @@ api.get('/chat/:conversationId/history', async (c) => {
         return c.json({ error: 'Invalid conversation ID' }, 400);
     }
 
-    const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
-    const conversation = results[0];
+    const conversation = await atifConversationService.getConversation(conversationId);
 
     if (!conversation) {
         return c.json({ error: 'Conversation not found' }, 404);
@@ -203,10 +202,11 @@ api.get('/conversations', async (c) => {
         ? and(baseWhere, sql`(
             ${Conversation.title} ILIKE ${searchPattern}
             OR EXISTS (
-                SELECT 1 FROM jsonb_array_elements(${Conversation.trajectory}->'steps') AS step
-                WHERE step->>'message' ILIKE ${searchPattern}
-                  AND (step->>'source' = 'user' OR (step->>'source' = 'agent' AND NOT step ? 'tool_calls'))
-                  AND NOT coalesce(step->'extra' ? 'is_compaction', false)
+                SELECT 1 FROM "conversation_step" AS step_row
+                WHERE step_row."conversation_id" = ${Conversation.id}
+                  AND step_row."step"->>'message' ILIKE ${searchPattern}
+                  AND (step_row."source" = 'user' OR (step_row."source" = 'agent' AND NOT step_row."step" ? 'tool_calls'))
+                  AND NOT coalesce(step_row."step"->'extra' ? 'is_compaction', false)
             )
           )`)
         : baseWhere;
@@ -217,7 +217,6 @@ api.get('/conversations', async (c) => {
         createdAt: Conversation.createdAt,
         updatedAt: Conversation.updatedAt,
         chatModelId: Conversation.chatModelId,
-        trajectory: Conversation.trajectory,
         automationId: Conversation.automationId,
         isPinned: Conversation.isPinned,
     })
@@ -225,13 +224,93 @@ api.get('/conversations', async (c) => {
     .where(whereClause)
     .orderBy(desc(Conversation.updatedAt));
 
+    const conversationIds = conversations.map(conv => conv.id);
+    const previewByConversation = new Map<string, string>();
+    const latestReasoningByConversation = new Map<string, string>();
+    const matchSnippetByConversation = new Map<string, string>();
+
+    if (conversationIds.length > 0) {
+        const previewRows = await db.select({
+            conversationId: ConversationStep.conversationId,
+            stepId: ConversationStep.stepId,
+            messagePreview: ConversationStep.messagePreview,
+        })
+        .from(ConversationStep)
+        .where(and(
+            inArray(ConversationStep.conversationId, conversationIds),
+            eq(ConversationStep.source, 'user'),
+            sql`NOT coalesce(${ConversationStep.step}->'extra' ? 'is_compaction', false)`,
+        ))
+        .orderBy(asc(ConversationStep.stepId));
+
+        for (const row of previewRows) {
+            if (!previewByConversation.has(row.conversationId)) {
+                previewByConversation.set(row.conversationId, row.messagePreview?.slice(0, 100) ?? '');
+            }
+        }
+
+        const reasoningRows = await db.select({
+            conversationId: ConversationStep.conversationId,
+            stepId: ConversationStep.stepId,
+            reasoning: sql<string | null>`${ConversationStep.step}->>'reasoning_content'`,
+        })
+        .from(ConversationStep)
+        .where(and(
+            inArray(ConversationStep.conversationId, conversationIds),
+            eq(ConversationStep.source, 'agent'),
+            sql`${ConversationStep.step} ? 'reasoning_content'`,
+        ))
+        .orderBy(asc(ConversationStep.stepId));
+
+        for (const row of reasoningRows) {
+            if (row.reasoning) {
+                latestReasoningByConversation.set(
+                    row.conversationId,
+                    row.reasoning
+                        .split('\n')[0]
+                        ?.replace(/^\*\*|\*\*$/g, '')
+                        ?.slice(0, 80) ?? ''
+                );
+            }
+        }
+
+        if (q) {
+            const matchRows = await db.select({
+                conversationId: ConversationStep.conversationId,
+                stepId: ConversationStep.stepId,
+                message: sql<string | null>`${ConversationStep.step}->>'message'`,
+            })
+            .from(ConversationStep)
+            .where(and(
+                inArray(ConversationStep.conversationId, conversationIds),
+                sql`${ConversationStep.step}->>'message' ILIKE ${searchPattern}`,
+                sql`(${ConversationStep.source} = 'user' OR (${ConversationStep.source} = 'agent' AND NOT ${ConversationStep.step} ? 'tool_calls'))`,
+                sql`NOT coalesce(${ConversationStep.step}->'extra' ? 'is_compaction', false)`,
+            ))
+            .orderBy(asc(ConversationStep.stepId));
+
+            const lowerQ = q.toLowerCase();
+            for (const row of matchRows) {
+                if (matchSnippetByConversation.has(row.conversationId) || !row.message) {
+                    continue;
+                }
+                const matchIndex = row.message.toLowerCase().indexOf(lowerQ);
+                if (matchIndex === -1) {
+                    continue;
+                }
+                const contextRadius = 50;
+                const start = Math.max(0, matchIndex - contextRadius);
+                const end = Math.min(row.message.length, matchIndex + q.length + contextRadius);
+                const prefix = start > 0 ? '...' : '';
+                const suffix = end < row.message.length ? '...' : '';
+                matchSnippetByConversation.set(row.conversationId, `${prefix}${row.message.slice(start, end)}${suffix}`);
+            }
+        }
+    }
+
     // Map to include a preview, active status, and latest reasoning
     const result = conversations.map(conv => {
-        // Find first user message in trajectory
-        const firstUserStep = conv.trajectory?.steps?.find(s => s.source === 'user');
-        const preview = firstUserStep?.message
-            ? firstUserStep.message.slice(0, 100)
-            : '';
+        const preview = previewByConversation.get(conv.id) ?? '';
 
         // Check if conversation has an active session
         const sessionStatus = getActiveStatus(conv.id);
@@ -240,42 +319,16 @@ api.get('/conversations', async (c) => {
         // Get latest reasoning from active session or from trajectory
         let latestReasoning = sessionStatus?.latestReasoning;
         if (!latestReasoning) {
-            // Find latest agent step with reasoning from trajectory
-            const latestAgentWithReasoning = [...(conv.trajectory?.steps || [])]
-                .reverse()
-                .find(s => s.source === 'agent' && s.reasoning_content);
-            latestReasoning = latestAgentWithReasoning?.reasoning_content
-                ?.split('\n')[0]              // First line only
-                ?.replace(/^\*\*|\*\*$/g, '') // Strip leading, ending **
-                ?.slice(0, 80);               // Truncate
+            latestReasoning = latestReasoningByConversation.get(conv.id);
         }
 
         // Extract a match snippet when searching (for matches in message content, not title)
-        let matchSnippet: string | undefined;
+        let matchSnippet = q ? matchSnippetByConversation.get(conv.id) : undefined;
         if (q) {
             const lowerQ = q.toLowerCase();
             const title = conv.title || preview || '';
-            if (!title.toLowerCase().includes(lowerQ)) {
-                // Search through user messages and agent final responses for the match
-                for (const step of conv.trajectory?.steps || []) {
-                    if (!step.message) continue;
-                    // Skip non-user/agent steps, tool-call steps, and compaction steps
-                    const isUserMsg = step.source === 'user';
-                    const isAgentFinal = step.source === 'agent' && !step.tool_calls;
-                    const isCompaction = step.extra?.is_compaction;
-                    if ((!isUserMsg && !isAgentFinal) || isCompaction) continue;
-
-                    const matchIndex = step.message.toLowerCase().indexOf(lowerQ);
-                    if (matchIndex !== -1) {
-                        const contextRadius = 50;
-                        const start = Math.max(0, matchIndex - contextRadius);
-                        const end = Math.min(step.message.length, matchIndex + q.length + contextRadius);
-                        const prefix = start > 0 ? '...' : '';
-                        const suffix = end < step.message.length ? '...' : '';
-                        matchSnippet = `${prefix}${step.message.slice(start, end)}${suffix}`;
-                        break;
-                    }
-                }
+            if (title.toLowerCase().includes(lowerQ)) {
+                matchSnippet = undefined;
             }
         }
 

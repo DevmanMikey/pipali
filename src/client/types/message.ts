@@ -15,6 +15,9 @@ export type Message = {
         code: 'session_expired';
         message: string;
     };
+    runErrorInfo?: {
+        message: string;
+    };
     /** File names attached by the user (extracted from <attached_files> block) */
     attachedFiles?: string[];
     /** True for user messages waiting in the soft-interrupt queue (run_started not yet received). */
@@ -30,4 +33,5 @@ export type Thought = {
     toolResult?: string;
     isInternalThought?: boolean; // True for model's internal reasoning (rendered in italics)
     isPending?: boolean; // True for tool calls that are currently executing (no results yet)
+    stepGroupId?: string; // Groups flattened thoughts/tool calls that came from the same trajectory step
 };

@@ -2,6 +2,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { sql } from "drizzle-orm";
 import { parseArgs } from "util";
 import { db, closeDatabase } from "./db";
+import { runMaintenanceMigrations } from "./db/maintenance";
 import app from "./routes";
 import api from "./routes/api";
 import { initializeDatabase } from "./init";
@@ -192,6 +193,8 @@ async function main() {
     } else {
         await migrate(db, { migrationsFolder: getMigrationsFolder() });
     }
+
+    await runMaintenanceMigrations();
 
     // Initialize database (creates user, sets up models from env vars in anon mode)
     await initializeDatabase();

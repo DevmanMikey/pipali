@@ -10,6 +10,8 @@ interface AutomationCardProps {
     automation: AutomationInfo;
     pendingConfirmation?: AutomationPendingConfirmation;
     onClick?: () => void;
+    onToggleStatus?: (status: 'active' | 'paused') => void;
+    isToggling?: boolean;
 }
 
 // Parse cron schedule to human-readable format
@@ -52,12 +54,13 @@ function formatSchedule(automation: AutomationInfo, t: TFunction): string {
     return config.schedule;
 }
 
-const STATUS_KEYS: Record<string, string> = {
-    active: 'automations.statusActive',
-    paused: 'automations.statusPaused',
-};
-
-export function AutomationCard({ automation, pendingConfirmation, onClick }: AutomationCardProps) {
+export function AutomationCard({
+    automation,
+    pendingConfirmation,
+    onClick,
+    onToggleStatus,
+    isToggling = false,
+}: AutomationCardProps) {
     const { t } = useTranslation();
     const isActive = automation.status === 'active';
     const isPaused = automation.status === 'paused';
@@ -69,6 +72,7 @@ export function AutomationCard({ automation, pendingConfirmation, onClick }: Aut
     // Determine card classes
     const cardClasses = [
         'automation-card',
+        isActive ? 'active' : '',
         isPaused ? 'paused' : '',
         hasConfirmation ? 'awaiting-confirmation' : '',
     ].filter(Boolean).join(' ');
@@ -86,20 +90,34 @@ export function AutomationCard({ automation, pendingConfirmation, onClick }: Aut
                 }
             }}
         >
-            <div className="automation-card-header">
-                {hasConfirmation ? (
-                    <div className="automation-status-badge awaiting-confirmation">
-                        <AlertCircle size={10} />
-                        {t('automations.needsApproval')}
-                    </div>
-                ) : (
-                    <div className={`automation-status-badge ${automation.status}`}>
-                        {t(STATUS_KEYS[automation.status] ?? 'automations.statusActive', { defaultValue: automation.status })}
-                    </div>
-                )}
+            <div className="automation-card-title-row">
+                <h3 className="automation-card-title">{automation.name}</h3>
+                <button
+                    type="button"
+                    className={`automation-toggle-btn ${isActive ? 'automation-toggle-on' : ''}`}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleStatus?.(isActive ? 'paused' : 'active');
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    disabled={isToggling}
+                    title={isActive ? t('automations.pause') : t('automations.resume')}
+                    aria-label={isActive ? t('automations.pause') : t('automations.resume')}
+                    role="switch"
+                    aria-checked={isActive}
+                >
+                    <span className="automation-toggle-track">
+                        <span className="automation-toggle-thumb" />
+                    </span>
+                </button>
             </div>
 
-            <h3 className="automation-card-title">{automation.name}</h3>
+            {hasConfirmation && (
+                <div className="automation-status-badge awaiting-confirmation">
+                    <AlertCircle size={10} />
+                    {t('automations.needsApproval')}
+                </div>
+            )}
 
             {automation.description && (
                 <p className="automation-card-description">{automation.description}</p>

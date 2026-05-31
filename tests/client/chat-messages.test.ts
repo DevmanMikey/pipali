@@ -124,6 +124,26 @@ describe('mergeHistoryWithLive — soft interrupt duplication', () => {
         expect(merged[3]!.thoughts).toHaveLength(2);
     });
 
+    test('run error card survives merge because it is not persisted', () => {
+        const history: Message[] = [
+            userMsg('1', 'question'),
+            assistantMsg('2', '', { thoughts: [toolThought('tc1', 'read', 'ok')] }),
+        ];
+
+        const live: Message[] = [
+            ...history,
+            assistantMsg('run-error-1', '', {
+                runErrorInfo: { message: '{"error":{"message":"provider failed"}}' },
+            }),
+        ];
+
+        const merged = mergeHistoryWithLive(history, live);
+
+        expect(merged).toHaveLength(3);
+        expect(merged[2]?.runErrorInfo?.message).toContain('provider failed');
+        expect(merged[2]?.content).toBe('');
+    });
+
     /**
      * Completed assistant has UUID stableId (not yet reconciled) but its numeric
      * id matches history. The role:id dedup should prevent duplication even though

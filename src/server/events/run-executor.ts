@@ -84,7 +84,7 @@ async function ensureSystemPromptPersisted(
 
     const modelName = conversation?.trajectory.agent.model_name.toLowerCase() || '';
     const provideUpdatesPreamble = /^gpt-5\.[4-9]/.test(modelName)
-        ? "Provide intermediate updates to communicate progress and new information to the user as you are doing work or thinking for long. Tone of your updates must match your personality."
+        ? "Provide frequent, user-visible intermediary updates to communicate progress and new information to the user as you work. Tone of your updates must match your personality."
         : undefined;
 
     const userContext = await loadUserContext();

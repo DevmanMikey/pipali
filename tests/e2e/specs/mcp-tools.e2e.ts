@@ -74,10 +74,10 @@ test.describe('MCP Tools Page', () => {
 
             // Check both transport options are available
             const stdioBtn = mcpToolsPage.transportTypeSelector.locator('button:has-text("stdio")');
-            const sseBtn = mcpToolsPage.transportTypeSelector.locator('button:has-text("HTTP/SSE")');
+            const httpBtn = mcpToolsPage.transportTypeSelector.locator('button:has-text("HTTP")');
 
             await expect(stdioBtn).toBeVisible();
-            await expect(sseBtn).toBeVisible();
+            await expect(httpBtn).toBeVisible();
         });
 
         test('should create a new stdio server', async ({ page }) => {
@@ -88,7 +88,8 @@ test.describe('MCP Tools Page', () => {
                 name: serverName,
                 description: 'A test MCP server',
                 transportType: 'stdio',
-                path: '@modelcontextprotocol/server-test',
+                // Exits immediately without speaking MCP, so enabled-by-default connect fails fast without unnecessary package downloads.
+                path: '/usr/bin/true',
             });
             await mcpToolsPage.submitCreateForm();
 
@@ -100,15 +101,16 @@ test.describe('MCP Tools Page', () => {
             await mcpToolsPage.deleteServerByNameViaAPI(serverName);
         });
 
-        test('should create a new SSE server', async ({ page }) => {
-            const serverName = `test-sse-${Date.now()}`;
+        test('should create a new HTTP server', async ({ page }) => {
+            const serverName = `test-http-${Date.now()}`;
 
             await mcpToolsPage.openCreateModal();
             await mcpToolsPage.fillCreateForm({
                 name: serverName,
-                description: 'A test SSE MCP server',
-                transportType: 'sse',
-                path: 'https://example.com/mcp',
+                description: 'A test HTTP MCP server',
+                transportType: 'http',
+                // Local refused port fails fast and avoids long external network timeouts.
+                path: 'http://127.0.0.1:1/mcp',
             });
             await mcpToolsPage.submitCreateForm();
 
@@ -348,6 +350,41 @@ test.describe('MCP Tools Page', () => {
     });
 
     test.describe('Server Status Display', () => {
+        test('should toggle a server from its card without opening details', async ({ request }) => {
+            const serverName = `toggle-test-${Date.now()}`;
+            const response = await request.post('/api/mcp/servers', {
+                data: {
+                    name: serverName,
+                    description: 'Server with card toggle',
+                    transportType: 'http',
+                    path: 'http://127.0.0.1:1/mcp',
+                    enabled: true,
+                },
+            });
+            const data = await response.json();
+            createdServerIds.push(data.server.id);
+
+            await mcpToolsPage.goto();
+
+            const toggle = mcpToolsPage.getServerToggleByName(serverName);
+            await expect(toggle).toBeChecked();
+
+            await mcpToolsPage.toggleServerFromCard(serverName);
+
+            await expect(mcpToolsPage.detailModal).not.toBeVisible();
+            await expect(toggle).not.toBeChecked();
+            await expect.poll(async () => {
+                const status = await mcpToolsPage.getServerStatus(serverName);
+                return status.toLowerCase();
+            }).toContain('disabled');
+
+            await expect.poll(async () => {
+                const getResponse = await request.get(`/api/mcp/servers/${data.server.id}`);
+                const getData = await getResponse.json();
+                return getData.server.enabled;
+            }).toBe(false);
+        });
+
         test('should show disabled status for disabled server', async ({ request }) => {
             const serverName = `status-test-${Date.now()}`;
             const response = await request.post('/api/mcp/servers', {

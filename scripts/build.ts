@@ -134,6 +134,32 @@ async function readMigrations(): Promise<{ migrations: { sql: string; tag: strin
     return { migrations };
 }
 
+async function readMaintenanceMigrations(): Promise<{ maintenanceMigrations: { sql: string; tag: string }[] }> {
+    console.log("📦 Reading database maintenance migrations...");
+
+    const maintenanceDir = path.join(DRIZZLE_SRC, "maintenance");
+    const journalPath = path.join(maintenanceDir, "_journal.json");
+
+    try {
+        await fs.access(journalPath);
+    } catch {
+        console.log("✅ Read 0 maintenance migration(s)");
+        return { maintenanceMigrations: [] };
+    }
+
+    const journal = JSON.parse(await fs.readFile(journalPath, "utf-8"));
+    const maintenanceMigrations: { sql: string; tag: string }[] = [];
+
+    for (const entry of journal.entries) {
+        const sqlPath = path.join(maintenanceDir, `${entry.tag}.sql`);
+        const sql = await fs.readFile(sqlPath, "utf-8");
+        maintenanceMigrations.push({ sql, tag: entry.tag });
+    }
+
+    console.log(`✅ Read ${maintenanceMigrations.length} maintenance migration(s)`);
+    return { maintenanceMigrations };
+}
+
 async function readIcons(): Promise<{ [key: string]: string }> {
     console.log("🎨 Reading icon assets...");
 
@@ -229,6 +255,7 @@ function escapeForTemplate(str: string): string {
 
 async function generateEmbeddedAssets(
     migrations: { sql: string; tag: string }[],
+    maintenanceMigrations: { sql: string; tag: string }[],
     indexHtml: string,
     stylesCss: string,
     appJs: string,
@@ -243,6 +270,10 @@ async function generateEmbeddedAssets(
     await fs.writeFile(EMBEDDED_ASSETS_BACKUP, original);
 
     const migrationsArray = migrations.map(m =>
+        `  { sql: \`${escapeForTemplate(m.sql)}\`, tag: "${m.tag}" }`
+    ).join(",\n");
+
+    const maintenanceMigrationsArray = maintenanceMigrations.map(m =>
         `  { sql: \`${escapeForTemplate(m.sql)}\`, tag: "${m.tag}" }`
     ).join(",\n");
 
@@ -264,6 +295,10 @@ async function generateEmbeddedAssets(
 
 export const EMBEDDED_MIGRATIONS: { sql: string; tag: string }[] = [
 ${migrationsArray}
+];
+
+export const EMBEDDED_MAINTENANCE_MIGRATIONS: { sql: string; tag: string }[] = [
+${maintenanceMigrationsArray}
 ];
 
 export const EMBEDDED_INDEX_HTML = \`${escapeForTemplate(indexHtml)}\`;
@@ -308,6 +343,7 @@ async function restoreEmbeddedAssets() {
 
 // Placeholder - this file is regenerated during build
 export const EMBEDDED_MIGRATIONS: { sql: string; tag: string }[] = [];
+export const EMBEDDED_MAINTENANCE_MIGRATIONS: { sql: string; tag: string }[] = [];
 export const EMBEDDED_INDEX_HTML = "";
 export const EMBEDDED_STYLES_CSS = "";
 export const EMBEDDED_APP_JS = "";
@@ -386,13 +422,14 @@ async function main() {
         const { appJs } = await buildFrontend();
         const stylesCss = await bundleCss();
         const { migrations } = await readMigrations();
+        const { maintenanceMigrations } = await readMaintenanceMigrations();
         const icons = await readIcons();
         const builtinSkills = await readBuiltinSkills();
         const indexHtml = await fs.readFile(path.join(CLIENT_SRC, "index.html"), "utf-8");
         const changelog = await readChangelog();
 
         // Generate embedded assets module
-        await generateEmbeddedAssets(migrations, indexHtml, stylesCss, appJs, icons, builtinSkills, changelog);
+        await generateEmbeddedAssets(migrations, maintenanceMigrations, indexHtml, stylesCss, appJs, icons, builtinSkills, changelog);
 
         // Compile
         await compile(target);

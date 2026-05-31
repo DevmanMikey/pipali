@@ -13,6 +13,7 @@
 import { refreshAccessToken, getValidAccessToken } from '../auth';
 import { createChildLogger } from '../logger';
 import { PlatformBillingError } from './billing-errors';
+import { getClientHeaders } from './client-info';
 
 const log = createChildLogger({ component: 'platform-fetch' });
 
@@ -124,6 +125,7 @@ export async function platformFetch<T = unknown>(
 
     const makeRequest = async (currentToken: string, attempt: number): Promise<PlatformFetchResult<T>> => {
         const headers = {
+            ...getClientHeaders(),
             ...providedHeaders,
             'Authorization': `Bearer ${currentToken}`,
         };

@@ -1,5 +1,5 @@
-import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb, real } from 'drizzle-orm/pg-core';
-import { type ATIFTrajectory } from '../processor/conversation/atif/atif.types';
+import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb, real, primaryKey, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { type ATIFAgent, type ATIFFinalMetrics, type ATIFStep, type ATIFStepSource, type ATIFTrajectory } from '../processor/conversation/atif/atif.types';
 import { type TriggerConfig, type TriggerEventData } from '../automation/types';
 import { type ConfirmationRequest } from '../processor/confirmation/confirmation.types';
 
@@ -203,7 +203,11 @@ export const agents = pgTable('agents', {
 export const Conversation = pgTable('conversation', {
     id: uuid('id').defaultRandom().notNull().primaryKey(),
     userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
-    trajectory: jsonb('trajectory').$type<ATIFTrajectory>().notNull(),
+    schemaVersion: text('schema_version').default('ATIF-v1.4').notNull(),
+    sessionId: text('session_id').notNull(),
+    agent: jsonb('agent').$type<ATIFAgent>().notNull(),
+    finalMetrics: jsonb('final_metrics').$type<ATIFFinalMetrics>(),
+    extra: jsonb('extra').$type<Record<string, unknown>>(),
     title: text('title'),
     // Optional link to automation - if set, this conversation belongs to an automation
     automationId: uuid('automation_id'),
@@ -211,6 +215,20 @@ export const Conversation = pgTable('conversation', {
     isPinned: boolean('is_pinned').default(false).notNull(),
     ...dbBaseModel,
 });
+
+export const ConversationStep = pgTable('conversation_step', {
+    conversationId: uuid('conversation_id').notNull().references(() => Conversation.id, { onDelete: 'cascade' }),
+    stepId: integer('step_id').notNull(),
+    source: text('source').$type<ATIFStepSource>().notNull(),
+    timestamp: timestamp('timestamp').notNull(),
+    messagePreview: text('message_preview'),
+    step: jsonb('step').$type<ATIFStep>().notNull(),
+    ...dbBaseModel,
+}, (table) => [
+    primaryKey({ columns: [table.conversationId, table.stepId] }),
+    index('conversation_step_conversation_id_idx').on(table.conversationId),
+    index('conversation_step_source_idx').on(table.source),
+]);
 
 // Web Search Provider Configuration Schema
 export const WebSearchProviderTypeEnum = pgEnum('web_search_provider_type', ['exa', 'serper', 'platform']);
@@ -314,7 +332,9 @@ export const PendingConfirmation = pgTable('pending_confirmation', {
 });
 
 // MCP Server Configuration Schema
-export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'sse']);
+export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'http']);
+export const McpAuthTypeEnum = pgEnum('mcp_auth_type', ['none', 'bearer', 'oauth']);
+export const McpOAuthStatusEnum = pgEnum('mcp_oauth_status', ['not_connected', 'auth_pending', 'connected', 'auth_required', 'error']);
 
 /**
  * Confirmation mode for MCP server tool calls:
@@ -334,11 +354,15 @@ export const McpServer = pgTable('mcp_server', {
     // Connection configuration
     transportType: McpTransportTypeEnum('transport_type').notNull(),
     // For stdio: path to script (.py/.js) or npm package name (@scope/package)
-    // For SSE: HTTP/HTTPS URL endpoint
+    // For HTTP: HTTPS URL endpoint
     path: text('path').notNull(),
 
     // Optional API key for authenticated servers
     apiKey: text('api_key'),
+
+    // Authentication mode for HTTP-based MCP servers
+    authType: McpAuthTypeEnum('auth_type').default('none').notNull(),
+    oauthStatus: McpOAuthStatusEnum('oauth_status').default('not_connected').notNull(),
 
     // Optional environment variables to pass to stdio servers (JSON object)
     env: jsonb('env').$type<Record<string, string>>(),
@@ -360,6 +384,24 @@ export const McpServer = pgTable('mcp_server', {
 
     ...dbBaseModel,
 });
+
+// OAuth session and client registration state for HTTP-based MCP servers.
+// Secrets are kept separate from the server config so API responses can omit them.
+export const McpOAuthState = pgTable('mcp_oauth_state', {
+    id: serial('id').primaryKey(),
+    serverId: integer('server_id').notNull().references(() => McpServer.id, { onDelete: 'cascade' }),
+    authorizationServerUrl: text('authorization_server_url'),
+    resourceUrl: text('resource_url'),
+    scope: text('scope'),
+    state: text('state'),
+    codeVerifier: text('code_verifier'),
+    clientInformation: jsonb('client_information').$type<Record<string, unknown>>(),
+    tokens: jsonb('tokens').$type<Record<string, unknown>>(),
+    lastAuthorizationUrl: text('last_authorization_url'),
+    ...dbBaseModel,
+}, (table) => ({
+    serverIdUnique: uniqueIndex('mcp_oauth_state_server_id_unique').on(table.serverId),
+}));
 
 // Platform Authentication Token Storage
 // Stores tokens for authenticated sessions with the Pipali Platform

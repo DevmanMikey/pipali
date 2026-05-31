@@ -9,6 +9,7 @@
 
 // Placeholder - this file is regenerated during build
 export const EMBEDDED_MIGRATIONS: { sql: string; tag: string }[] = [];
+export const EMBEDDED_MAINTENANCE_MIGRATIONS: { sql: string; tag: string }[] = [];
 export const EMBEDDED_INDEX_HTML = "";
 export const EMBEDDED_STYLES_CSS = "";
 export const EMBEDDED_APP_JS = "";

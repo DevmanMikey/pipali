@@ -9,8 +9,8 @@ import {
     type ConfirmationContext,
     requestOperationConfirmation,
 } from '../confirmation';
-import { McpClient } from './client';
-import type { McpServerConfig, McpContentType } from './types';
+import { McpClient, isMcpOAuthUnauthorizedError } from './client';
+import type { McpServerConfig, McpContentType, McpToolCallResult, McpToolInfo } from './types';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'mcp' });
@@ -19,6 +19,48 @@ const log = createChildLogger({ component: 'mcp' });
  * Global registry of active MCP clients
  */
 const activeClients: Map<string, McpClient> = new Map();
+type McpConnectOptions = { oauthInteractive?: boolean; callbackOrigin?: string };
+const MCP_OAUTH_REAUTHORIZE_MESSAGE = 'OAuth authorization is required. Reconnect this MCP server from the Tools page.';
+
+async function markMcpServerAuthRequired(serverName: string, lastError: string = MCP_OAUTH_REAUTHORIZE_MESSAGE): Promise<void> {
+    await db
+        .update(McpServer)
+        .set({
+            oauthStatus: 'auth_required',
+            lastError,
+            updatedAt: new Date(),
+        })
+        .where(eq(McpServer.name, serverName));
+}
+
+export async function handleFailedMcpToolResult(
+    serverName: string,
+    namespacedName: string,
+    result: McpToolCallResult
+): Promise<string> {
+    if (result.authRequired) {
+        await markMcpServerAuthRequired(serverName, result.error ?? MCP_OAUTH_REAUTHORIZE_MESSAGE);
+    }
+
+    let errorMessage = `Error executing MCP tool ${namespacedName}: ${result.error}`;
+
+    // Add Chrome-specific setup guidance
+    if (serverName === 'chrome-browser' && result.error?.includes('chrome://inspect/#remote-debugging')) {
+        errorMessage +=
+            '\n\nIf Chrome is already installed and running, the user may need to ' +
+            '1. Open chrome://inspect/#remote-debugging on Chrome and 2. Tick "Allow remote debugging for this browser instance" to enable chrome browser use for you.';
+    }
+
+    return errorMessage;
+}
+
+export function createMcpToolDefinition(tool: McpToolInfo): ToolDefinition {
+    return {
+        name: tool.namespacedName,
+        description: `[MCP: ${tool.serverName}] ${tool.description}`,
+        schema: augmentSchemaWithOperationType(tool.inputSchema),
+    };
+}
 
 /**
  * Load and connect to all enabled MCP servers
@@ -35,7 +77,7 @@ export async function loadEnabledMcpServers(): Promise<void> {
     // Connect to each server
     const connectPromises = servers.map(async (server) => {
         try {
-            await connectMcpServer(server);
+            await connectMcpServer(server, { oauthInteractive: false });
             log.info(`Connected to server: ${server.name}`);
 
             // Update lastConnectedAt timestamp
@@ -51,10 +93,14 @@ export async function loadEnabledMcpServers(): Promise<void> {
             const fullError = causeMessage ? `${errorMessage}\nCause: ${causeMessage}` : errorMessage;
             log.error({ err: error, server: server.name }, 'Failed to connect to MCP server');
 
+            const oauthUpdate = isMcpOAuthUnauthorizedError(error) || server.authType === 'oauth'
+                ? { oauthStatus: 'auth_required' as const }
+                : {};
+
             // Store the error in the database
             await db
                 .update(McpServer)
-                .set({ lastError: fullError })
+                .set({ lastError: fullError, ...oauthUpdate })
                 .where(eq(McpServer.id, server.id));
         }
     });
@@ -65,7 +111,7 @@ export async function loadEnabledMcpServers(): Promise<void> {
 /**
  * Connect to a specific MCP server
  */
-async function connectMcpServer(config: McpServerConfig): Promise<void> {
+async function connectMcpServer(config: McpServerConfig, options: McpConnectOptions = {}): Promise<void> {
     // Close existing connection if any
     const existingClient = activeClients.get(config.name);
     if (existingClient) {
@@ -73,15 +119,35 @@ async function connectMcpServer(config: McpServerConfig): Promise<void> {
     }
 
     // Create and connect new client
-    const client = new McpClient(config);
-    await client.connect();
-    activeClients.set(config.name, client);
+    const client = new McpClient(config, options);
+    try {
+        await client.connect();
+        activeClients.set(config.name, client);
+        if (config.authType === 'oauth') {
+            await db
+                .update(McpServer)
+                .set({ oauthStatus: 'connected', lastError: null, updatedAt: new Date() })
+                .where(eq(McpServer.id, config.id));
+        }
+    } catch (error) {
+        if (config.authType === 'oauth' && isMcpOAuthUnauthorizedError(error)) {
+            await db
+                .update(McpServer)
+                .set({
+                    oauthStatus: 'auth_pending',
+                    lastError: 'OAuth authorization is required. Complete the browser sign-in flow to connect this MCP server.',
+                    updatedAt: new Date(),
+                })
+                .where(eq(McpServer.id, config.id));
+        }
+        throw error;
+    }
 }
 
 /**
  * Reconnect a specific MCP server (e.g., after config update)
  */
-export async function reconnectMcpServer(serverName: string): Promise<void> {
+export async function reconnectMcpServer(serverName: string, options: McpConnectOptions = {}): Promise<void> {
     // Get server config from database
     const [server] = await db
         .select()
@@ -92,7 +158,20 @@ export async function reconnectMcpServer(serverName: string): Promise<void> {
         throw new Error(`MCP server not found: ${serverName}`);
     }
 
-    await connectMcpServer(server);
+    await connectMcpServer(server, options);
+}
+
+/**
+ * Disconnect a specific MCP server if it is currently active.
+ */
+export async function disconnectMcpServer(serverName: string): Promise<void> {
+    const existingClient = activeClients.get(serverName);
+    if (!existingClient) {
+        return;
+    }
+
+    await existingClient.close();
+    activeClients.delete(serverName);
 }
 
 /**
@@ -120,14 +199,7 @@ export async function getMcpToolDefinitions(): Promise<ToolDefinition[]> {
                     }
                 }
 
-                // Augment the tool schema with operation_type property
-                const augmentedSchema = augmentSchemaWithOperationType(tool.inputSchema);
-
-                toolDefinitions.push({
-                    name: tool.namespacedName,
-                    description: `[MCP: ${tool.serverName}] ${tool.description}`,
-                    schema: augmentedSchema,
-                });
+                toolDefinitions.push(createMcpToolDefinition(tool));
             }
 
         } catch (error) {
@@ -143,7 +215,7 @@ export async function getMcpToolDefinitions(): Promise<ToolDefinition[]> {
  * This property is required for all MCP tool calls so the confirmation system
  * can determine whether confirmation is needed based on server settings.
  */
-function augmentSchemaWithOperationType(originalSchema: Record<string, unknown>): Record<string, unknown> {
+export function augmentSchemaWithOperationType(originalSchema: Record<string, unknown>): Record<string, unknown> {
     const schema = { ...originalSchema };
 
     // Ensure properties object exists
@@ -183,7 +255,7 @@ Examples:
  * @param operationType - The operation type specified by the agent ('safe' or 'unsafe')
  * @returns true if confirmation should be requested, false otherwise
  */
-function shouldRequireConfirmation(
+export function shouldRequireConfirmation(
     confirmationMode: 'always' | 'unsafe_only' | 'never',
     operationType: 'safe' | 'unsafe' | undefined
 ): boolean {
@@ -210,7 +282,7 @@ function shouldRequireConfirmation(
 /**
  * Parse a namespaced tool name into server name and tool name.
  */
-function parseNamespacedToolName(namespacedName: string): { serverName: string; toolName: string } | null {
+export function parseNamespacedToolName(namespacedName: string): { serverName: string; toolName: string } | null {
     const separatorIndex = namespacedName.indexOf('__');
     if (separatorIndex === -1) {
         return null;
@@ -220,6 +292,11 @@ function parseNamespacedToolName(namespacedName: string): { serverName: string; 
         serverName: namespacedName.slice(0, separatorIndex),
         toolName: namespacedName.slice(separatorIndex + 2), // Skip the '__' separator
     };
+}
+
+export function getMcpConfirmationSubType(serverName: string, operationType: 'safe' | 'unsafe' | undefined): string {
+    const opTypeStr = operationType === 'safe' ? 'safe' : 'unsafe';
+    return `${serverName}:${opTypeStr}`;
 }
 
 /**
@@ -267,8 +344,7 @@ export async function executeMcpTool(
         // Map operation_type to the format expected by confirmation service
         // Include server name in the subtype for per-server "don't ask again" preferences
         // e.g., "github:safe" -> key becomes "mcp_tool_call:github:safe"
-        const opTypeStr = operationType === 'safe' ? 'safe' : 'unsafe';
-        const operationSubType = `${serverName}:${opTypeStr}`;
+        const operationSubType = getMcpConfirmationSubType(serverName, operationType);
 
         const result = await requestOperationConfirmation(
             'mcp_tool_call',
@@ -303,16 +379,7 @@ export async function executeMcpTool(
     const result = await client.runTool(realToolName, realToolArgs);
 
     if (!result.success) {
-        let errorMessage = `Error executing MCP tool ${namespacedName}: ${result.error}`;
-
-        // Add Chrome-specific setup guidance
-        if (serverName === 'chrome-browser' && result.error?.includes('chrome://inspect/#remote-debugging')) {
-            errorMessage +=
-                '\n\nIf Chrome is already installed and running, the user may need to ' +
-                '1. Open chrome://inspect/#remote-debugging on Chrome and 2. Tick "Allow remote debugging for this browser instance" to enable chrome browser use for you.';
-        }
-
-        return errorMessage;
+        return handleFailedMcpToolResult(serverName, namespacedName, result);
     }
 
     // Convert result content to the format expected by the director

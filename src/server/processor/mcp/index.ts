@@ -3,6 +3,7 @@ export * from './client';
 export {
     loadEnabledMcpServers,
     reconnectMcpServer,
+    disconnectMcpServer,
     getMcpToolDefinitions,
     executeMcpTool,
     closeMcpClients,

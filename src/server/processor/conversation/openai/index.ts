@@ -4,6 +4,7 @@ import type { ChatMessage, ResponseWithThought, ToolDefinition, UsageMetrics } f
 import { toOpenaiTools, getReasoningText } from './utils';
 import { calculateCost, type PricingConfig } from '../costs';
 import { createChildLogger } from '../../../logger';
+import { getClientHeaders } from '../../../http/client-info';
 
 const log = createChildLogger({ component: 'llm' });
 
@@ -24,6 +25,7 @@ export async function sendMessageToGpt(
     const client = new OpenAI({
         apiKey: apiKey,
         baseURL: apiBaseUrl ?? undefined,
+        defaultHeaders: getClientHeaders(),
     });
 
     // Build metadata to trace message provenance

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, Trash2, Save, Play, Terminal, Globe, Plus, AlertCircle, CheckCircle } from 'lucide-react';
-import type { McpServerInfo, McpTransportType, McpConfirmationMode, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
+import { X, Loader2, Trash2, Save, Play, Terminal, Globe, Plus, AlertCircle, CheckCircle, KeyRound, ShieldCheck, CircleSlash } from 'lucide-react';
+import type { McpServerInfo, McpTransportType, McpConfirmationMode, McpAuthType, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
 import { useTranslation } from 'react-i18next';
 
@@ -14,10 +14,10 @@ interface McpServerDetailModalProps {
 export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: McpServerDetailModalProps) {
     const [description, setDescription] = useState(server.description || '');
     const [transportType, setTransportType] = useState<McpTransportType>(server.transportType);
+    const [authType, setAuthType] = useState<McpAuthType>(server.authType ?? (server.apiKey ? 'bearer' : 'none'));
     const [path, setPath] = useState(server.path);
     const [apiKey, setApiKey] = useState(server.apiKey || '');
     const [confirmationMode, setConfirmationMode] = useState<McpConfirmationMode>(server.confirmationMode);
-    const [enabled, setEnabled] = useState(server.enabled);
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>(() => {
         if (!server.env) return [];
         return Object.entries(server.env).map(([key, value]) => ({ key, value }));
@@ -31,6 +31,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isTesting, setIsTesting] = useState(false);
+    const [isReconnectingOAuth, setIsReconnectingOAuth] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -42,10 +43,10 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
     const hasChanges = (() => {
         if (description !== (server.description || '')) return true;
         if (transportType !== server.transportType) return true;
+        if (authType !== (server.authType ?? (server.apiKey ? 'bearer' : 'none'))) return true;
         if (path !== server.path) return true;
-        if (apiKey !== (server.apiKey || '')) return true;
+        if (authType === 'bearer' && apiKey !== (server.apiKey || '')) return true;
         if (confirmationMode !== server.confirmationMode) return true;
-        if (enabled !== server.enabled) return true;
 
         // Check env vars
         const currentEnv: Record<string, string> = {};
@@ -128,10 +129,10 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
             description: description || undefined,
             transportType,
             path,
-            apiKey: apiKey || undefined,
+            authType: transportType === 'http' ? authType : 'none',
+            apiKey: transportType === 'http' && authType === 'bearer' ? apiKey || undefined : undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
             confirmationMode,
-            enabled,
             enabledTools: enabledToolsSet.size > 0 ? Array.from(enabledToolsSet) : undefined,
         };
 
@@ -215,6 +216,32 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         }
     };
 
+    const handleReconnectOAuth = async () => {
+        setIsReconnectingOAuth(true);
+        setError(null);
+        setTestResult(null);
+
+        try {
+            const res = await apiFetch(`/api/mcp/servers/${server.id}/oauth/reconnect`, {
+                method: 'POST',
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setTestResult({
+                    success: true,
+                    message: t('mcpTools.oauthFlowStarted'),
+                });
+                onUpdated();
+            } else {
+                setError(data.error || t('mcpTools.oauthReconnectFailed'));
+            }
+        } catch {
+            setError(t('mcpTools.oauthReconnectFailed'));
+        } finally {
+            setIsReconnectingOAuth(false);
+        }
+    };
+
     const loadTools = async () => {
         setIsLoadingTools(true);
         try {
@@ -265,18 +292,21 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                                 <button
                                     type="button"
                                     className={`transport-type-btn ${transportType === 'stdio' ? 'active' : ''}`}
-                                    onClick={() => setTransportType('stdio')}
+                                    onClick={() => {
+                                        setTransportType('stdio');
+                                        setAuthType('none');
+                                    }}
                                 >
                                     <Terminal size={16} />
                                     <span>{t('mcpTools.stdio')}</span>
                                 </button>
                                 <button
                                     type="button"
-                                    className={`transport-type-btn ${transportType === 'sse' ? 'active' : ''}`}
-                                    onClick={() => setTransportType('sse')}
+                                    className={`transport-type-btn ${transportType === 'http' ? 'active' : ''}`}
+                                    onClick={() => setTransportType('http')}
                                 >
                                     <Globe size={16} />
-                                    <span>{t('mcpTools.httpSse')}</span>
+                                    <span>{t('mcpTools.http')}</span>
                                 </button>
                             </div>
                         </div>
@@ -293,17 +323,81 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                             />
                         </div>
 
-                        {transportType === 'sse' && (
-                            <div className="form-group">
-                                <label htmlFor="server-api-key">{t('mcpTools.apiKey')}</label>
-                                <input
-                                    id="server-api-key"
-                                    type="password"
-                                    value={apiKey}
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                    placeholder={t('mcpTools.apiKeyPlaceholder')}
-                                />
-                            </div>
+                        {transportType === 'http' && (
+                            <>
+                                <div className="form-group">
+                                    <label>{t('mcpTools.authType')}</label>
+                                    <div className="transport-type-selector compact">
+                                        <button
+                                            type="button"
+                                            className={`transport-type-btn ${authType === 'none' ? 'active' : ''}`}
+                                            onClick={() => setAuthType('none')}
+                                        >
+                                            <CircleSlash size={16} />
+                                            <span>{t('mcpTools.authNone')}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`transport-type-btn ${authType === 'bearer' ? 'active' : ''}`}
+                                            onClick={() => setAuthType('bearer')}
+                                        >
+                                            <KeyRound size={16} />
+                                            <span>{t('mcpTools.authBearer')}</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`transport-type-btn ${authType === 'oauth' ? 'active' : ''}`}
+                                            onClick={() => setAuthType('oauth')}
+                                        >
+                                            <ShieldCheck size={16} />
+                                            <span>{t('mcpTools.authOAuth')}</span>
+                                        </button>
+                                    </div>
+                                    <span className="form-hint">
+                                        {authType === 'oauth' ? t('mcpTools.authOAuthHint') : t('mcpTools.authTypeHint')}
+                                    </span>
+                                </div>
+
+                                {authType === 'bearer' && (
+                                    <div className="form-group">
+                                        <label htmlFor="server-api-key">{t('mcpTools.apiKey')}</label>
+                                        <input
+                                            id="server-api-key"
+                                            type="password"
+                                            value={apiKey}
+                                            onChange={(e) => setApiKey(e.target.value)}
+                                            placeholder={t('mcpTools.apiKeyPlaceholder')}
+                                        />
+                                    </div>
+                                )}
+
+                                {authType === 'oauth' && (
+                                    <div className="mcp-oauth-section">
+                                        <div className={`mcp-oauth-status ${server.oauthStatus}`}>
+                                            <ShieldCheck size={14} />
+                                            <span>{t(`mcpTools.oauthStatus.${server.oauthStatus}` as any)}</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleReconnectOAuth}
+                                            disabled={isReconnectingOAuth}
+                                            className="btn-secondary"
+                                        >
+                                            {isReconnectingOAuth ? (
+                                                <>
+                                                    <Loader2 size={16} className="spinning" />
+                                                    <span>{t('mcpTools.connectingOAuth')}</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <ShieldCheck size={16} />
+                                                    <span>{t('mcpTools.reconnectOAuth')}</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                )}
+                            </>
                         )}
 
                         {transportType === 'stdio' && (
@@ -378,19 +472,6 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                                 {confirmationMode === 'unsafe_only' && t('mcpTools.confirmUnsafeHintLong')}
                                 {confirmationMode === 'never' && t('mcpTools.confirmNeverHintShort')}
                             </span>
-                        </div>
-
-                        <div className="form-group form-toggle-group">
-                            <label htmlFor="server-enabled">{t('mcpTools.enableServerLong')}</label>
-                            <label className="toggle-switch">
-                                <input
-                                    id="server-enabled"
-                                    type="checkbox"
-                                    checked={enabled}
-                                    onChange={(e) => setEnabled(e.target.checked)}
-                                />
-                                <span className="toggle-slider"></span>
-                            </label>
                         </div>
 
                         {/* Test Connection Section */}

@@ -3,10 +3,10 @@
  * Manages conversation storage and retrieval in ATIF format
  */
 
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { asc, eq, and, inArray, isNull, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../../../db';
-import { Conversation, User } from '../../../db/schema';
+import { Conversation, ConversationStep, User } from '../../../db/schema';
 import { createEmptyATIFTrajectory } from './atif.types';
 import {
   type ATIFTrajectory,
@@ -17,13 +17,13 @@ import {
   type ATIFStepSource,
 } from './atif.types';
 import {
-  addStepToTrajectory,
   removeStepFromTrajectory,
   removeTurnFromTrajectory,
   removeAgentMessageFromTrajectory,
   validateATIFTrajectory,
   exportATIFTrajectory,
   importATIFTrajectory,
+  calculateFinalMetrics,
   sanitizeForJsonb,
 } from './atif.utils';
 import { createChildLogger } from '../../../logger';
@@ -40,10 +40,76 @@ export interface ConversationWithTrajectory {
   updatedAt: Date;
 }
 
+type ConversationRow = typeof Conversation.$inferSelect;
+
+function buildTrajectory(conversation: ConversationRow, steps: ATIFStep[]): ATIFTrajectory {
+  const trajectory: ATIFTrajectory = {
+    schema_version: conversation.schemaVersion,
+    session_id: conversation.sessionId,
+    agent: conversation.agent,
+    steps,
+  };
+
+  if (conversation.finalMetrics) {
+    trajectory.final_metrics = conversation.finalMetrics;
+  }
+  if (conversation.extra) {
+    trajectory.extra = conversation.extra;
+  }
+
+  return trajectory;
+}
+
+function withTrajectory(conversation: ConversationRow, steps: ATIFStep[]): ConversationWithTrajectory {
+  return {
+    id: conversation.id,
+    userId: conversation.userId,
+    trajectory: buildTrajectory(conversation, steps),
+    title: conversation.title,
+    chatModelId: conversation.chatModelId,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+  };
+}
+
+function getStepTimestamp(step: ATIFStep): Date {
+  const date = new Date(step.timestamp);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function getMessagePreview(message: string | undefined): string | undefined {
+  if (!message) {
+    return undefined;
+  }
+  return message.slice(0, 240);
+}
+
+function addMetricsToFinalMetrics(
+  previous: ATIFMetrics | undefined,
+  current: ATIFMetrics | undefined,
+): ATIFMetrics {
+  return {
+    prompt_tokens: (previous?.prompt_tokens ?? 0) + (current?.prompt_tokens ?? 0),
+    completion_tokens: (previous?.completion_tokens ?? 0) + (current?.completion_tokens ?? 0),
+    cached_tokens: (previous?.cached_tokens ?? 0) + (current?.cached_tokens ?? 0) || undefined,
+    cost_usd: (previous?.cost_usd ?? 0) + (current?.cost_usd ?? 0),
+  };
+}
+
 /**
  * Service class for managing conversations with ATIF support
  */
 export class ATIFConversationService {
+  private async getSteps(conversationId: string): Promise<ATIFStep[]> {
+    const rows = await db
+      .select({ step: ConversationStep.step })
+      .from(ConversationStep)
+      .where(eq(ConversationStep.conversationId, conversationId))
+      .orderBy(asc(ConversationStep.stepId));
+
+    return rows.map(row => row.step);
+  }
+
   /**
    * Creates a new conversation with ATIF trajectory
    */
@@ -64,18 +130,28 @@ export class ATIFConversationService {
       modelName
     );
 
-    // Build insert data object with required fields
     const insertData: {
       userId: number;
-      trajectory: ATIFTrajectory;
+      schemaVersion: string;
+      sessionId: string;
+      agent: ATIFTrajectory['agent'];
+      finalMetrics?: ATIFTrajectory['final_metrics'];
+      extra?: Record<string, unknown>;
       title?: string;
       chatModelId?: number;
     } = {
       userId: user.id,
-      trajectory: trajectory,
+      schemaVersion: trajectory.schema_version,
+      sessionId: trajectory.session_id,
+      agent: trajectory.agent,
     };
 
-    // Add optional fields only if provided
+    if (trajectory.final_metrics) {
+      insertData.finalMetrics = trajectory.final_metrics;
+    }
+    if (trajectory.extra) {
+      insertData.extra = trajectory.extra;
+    }
     if (title) {
       insertData.title = title;
     }
@@ -85,8 +161,8 @@ export class ATIFConversationService {
 
     log.debug({
       userId: insertData.userId,
-      hasTrajectory: !!insertData.trajectory,
-      trajectoryValid: validateATIFTrajectory(insertData.trajectory).valid,
+      sessionId: insertData.sessionId,
+      trajectoryValid: validateATIFTrajectory(trajectory).valid,
     }, 'Creating conversation');
 
     try {
@@ -100,7 +176,7 @@ export class ATIFConversationService {
       }
 
       log.debug({ conversationId: newConversation.id }, 'Conversation created');
-      return newConversation as ConversationWithTrajectory;
+      return withTrajectory(newConversation, []);
     } catch (error) {
       log.error({ err: error }, 'Error creating conversation');
       throw error;
@@ -120,7 +196,8 @@ export class ATIFConversationService {
       return null;
     }
 
-    return conversation as ConversationWithTrajectory;
+    const steps = await this.getSteps(conversationId);
+    return withTrajectory(conversation, steps);
   }
 
 
@@ -138,51 +215,126 @@ export class ATIFConversationService {
     rawOutput?: unknown[],
     extra?: Record<string, unknown>,
   ): Promise<ATIFStep> {
-    const conversation = await this.getConversation(conversationId);
+    return await db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`
+        SELECT
+          id,
+          final_metrics
+        FROM conversation
+        WHERE id = ${conversationId}
+        FOR UPDATE
+      `);
+      const conversation = locked.rows[0] as { final_metrics: ConversationRow['finalMetrics'] } | undefined;
 
-    if (!conversation) {
-      throw new Error(`Conversation ${conversationId} not found`);
-    }
+      if (!conversation) {
+        throw new Error(`Conversation ${conversationId} not found`);
+      }
 
-    const trajectory = conversation.trajectory;
+      const [stats] = await tx
+        .select({
+          maxStepId: sql<number>`coalesce(max(${ConversationStep.stepId}), 0)::int`,
+          stepCount: sql<number>`count(*)::int`,
+        })
+        .from(ConversationStep)
+        .where(eq(ConversationStep.conversationId, conversationId));
 
-    // Add step to trajectory
-    const step = addStepToTrajectory(
-      trajectory,
-      source,
-      message,
-      toolCalls,
-      observation,
-      metrics,
-    );
+      const step: ATIFStep = {
+        step_id: Number(stats?.maxStepId ?? 0) + 1,
+        timestamp: new Date().toISOString(),
+        source,
+        message,
+        tool_calls: toolCalls,
+        observation,
+        metrics,
+      };
 
-    // Add reasoning content if provided
-    if (reasoningContent) {
-      step.reasoning_content = reasoningContent;
-    }
+      if (reasoningContent) {
+        step.reasoning_content = reasoningContent;
+      }
+      if (rawOutput && rawOutput.length > 0) {
+        step.extra = { ...step.extra, raw_output: rawOutput };
+      }
+      if (extra) {
+        step.extra = { ...step.extra, ...extra };
+      }
 
-    // Store raw LLM response for multi-turn passthrough
-    if (rawOutput && rawOutput.length > 0) {
-      step.extra = { ...step.extra, raw_output: rawOutput };
-    }
+      const totals = addMetricsToFinalMetrics(
+        conversation.final_metrics
+          ? {
+              prompt_tokens: conversation.final_metrics.total_prompt_tokens,
+              completion_tokens: conversation.final_metrics.total_completion_tokens,
+              cached_tokens: conversation.final_metrics.total_cached_tokens,
+              cost_usd: conversation.final_metrics.total_cost_usd,
+            }
+          : undefined,
+        metrics,
+      );
+      const finalMetrics = {
+        total_prompt_tokens: totals.prompt_tokens,
+        total_completion_tokens: totals.completion_tokens,
+        total_cached_tokens: totals.cached_tokens,
+        total_cost_usd: totals.cost_usd,
+        total_steps: Number(stats?.stepCount ?? 0) + 1,
+      };
+      const now = new Date();
+      const sanitizedStep = sanitizeForJsonb(step);
 
-    // Merge any additional extra fields
-    if (extra) {
-      step.extra = { ...step.extra, ...extra };
-    }
+      await tx.insert(ConversationStep).values({
+        conversationId,
+        stepId: step.step_id,
+        source,
+        timestamp: getStepTimestamp(step),
+        messagePreview: getMessagePreview(message),
+        step: sanitizedStep,
+        createdAt: now,
+        updatedAt: now,
+      });
 
-    // Update database
-    await db
-      .update(Conversation)
-      .set({
-        trajectory: sanitizeForJsonb(trajectory),
-        updatedAt: new Date(),
-      })
-      .where(eq(Conversation.id, conversationId));
+      await tx
+        .update(Conversation)
+        .set({
+          finalMetrics: sanitizeForJsonb(finalMetrics),
+          updatedAt: now,
+        })
+        .where(eq(Conversation.id, conversationId));
 
-    return step;
+      return sanitizedStep;
+    });
   }
 
+  private async persistStepDeletions(
+    conversationId: string,
+    beforeSteps: ATIFStep[],
+    afterSteps: ATIFStep[],
+  ): Promise<number> {
+    const afterIds = new Set(afterSteps.map(step => step.step_id));
+    const removedIds = beforeSteps
+      .map(step => step.step_id)
+      .filter(stepId => !afterIds.has(stepId));
+
+    if (removedIds.length === 0) {
+      return 0;
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(ConversationStep)
+        .where(and(
+          eq(ConversationStep.conversationId, conversationId),
+          inArray(ConversationStep.stepId, removedIds),
+        ));
+
+      await tx
+        .update(Conversation)
+        .set({
+          finalMetrics: sanitizeForJsonb(calculateFinalMetrics(afterSteps)),
+          updatedAt: new Date(),
+        })
+        .where(eq(Conversation.id, conversationId));
+    });
+
+    return removedIds.length;
+  }
 
   /**
    * Deletes a step from a conversation by step_id
@@ -196,20 +348,14 @@ export class ATIFConversationService {
     }
 
     const trajectory = conversation.trajectory;
+    const beforeSteps = [...trajectory.steps];
     const removed = removeStepFromTrajectory(trajectory, stepId);
 
     if (!removed) {
       return false;
     }
 
-    // Update database
-    await db
-      .update(Conversation)
-      .set({
-        trajectory: sanitizeForJsonb(trajectory),
-        updatedAt: new Date(),
-      })
-      .where(eq(Conversation.id, conversationId));
+    await this.persistStepDeletions(conversationId, beforeSteps, trajectory.steps);
 
     return true;
   }
@@ -228,22 +374,14 @@ export class ATIFConversationService {
     }
 
     const trajectory = conversation.trajectory;
+    const beforeSteps = [...trajectory.steps];
     const removedCount = removeTurnFromTrajectory(trajectory, stepId);
 
     if (removedCount === 0) {
       return 0;
     }
 
-    // Update database
-    await db
-      .update(Conversation)
-      .set({
-        trajectory: sanitizeForJsonb(trajectory),
-        updatedAt: new Date(),
-      })
-      .where(eq(Conversation.id, conversationId));
-
-    return removedCount;
+    return await this.persistStepDeletions(conversationId, beforeSteps, trajectory.steps);
   }
 
   /**
@@ -260,22 +398,14 @@ export class ATIFConversationService {
     }
 
     const trajectory = conversation.trajectory;
+    const beforeSteps = [...trajectory.steps];
     const removedCount = removeAgentMessageFromTrajectory(trajectory, stepId);
 
     if (removedCount === 0) {
       return 0;
     }
 
-    // Update database
-    await db
-      .update(Conversation)
-      .set({
-        trajectory: sanitizeForJsonb(trajectory),
-        updatedAt: new Date(),
-      })
-      .where(eq(Conversation.id, conversationId));
-
-    return removedCount;
+    return await this.persistStepDeletions(conversationId, beforeSteps, trajectory.steps);
   }
 
   /**
@@ -308,18 +438,39 @@ export class ATIFConversationService {
 
     title = title || `Imported: ${trajectory.session_id}`;
     const conversationId = uuidv4();
-    const [newConversation] = await db.insert(Conversation).values({
-      id: conversationId,
-      userId,
-      trajectory: sanitizeForJsonb(trajectory),
-      title: title,
-    }).returning();
+    const sanitizedTrajectory = sanitizeForJsonb(trajectory);
 
-    if (!newConversation) {
-      throw new Error('Failed to import conversation');
-    }
+    const newConversation = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(Conversation).values({
+        id: conversationId,
+        userId,
+        schemaVersion: sanitizedTrajectory.schema_version,
+        sessionId: sanitizedTrajectory.session_id,
+        agent: sanitizedTrajectory.agent,
+        finalMetrics: sanitizedTrajectory.final_metrics ?? calculateFinalMetrics(sanitizedTrajectory.steps),
+        extra: sanitizedTrajectory.extra,
+        title,
+      }).returning();
 
-    return newConversation as ConversationWithTrajectory;
+      if (!created) {
+        throw new Error('Failed to import conversation');
+      }
+
+      if (sanitizedTrajectory.steps.length > 0) {
+        await tx.insert(ConversationStep).values(sanitizedTrajectory.steps.map(step => ({
+          conversationId,
+          stepId: step.step_id,
+          source: step.source,
+          timestamp: getStepTimestamp(step),
+          messagePreview: getMessagePreview(step.message),
+          step,
+        })));
+      }
+
+      return created;
+    });
+
+    return withTrajectory(newConversation, sanitizedTrajectory.steps);
   }
 
   /**
@@ -341,7 +492,7 @@ export class ATIFConversationService {
     // Create a deep copy of the trajectory
     const sourceTrajectory = sourceConversation.trajectory;
     const newSessionId = uuidv4();
-    const newTrajectory: ATIFTrajectory = {
+    const newTrajectory: ATIFTrajectory = sanitizeForJsonb({
       ...sourceTrajectory,
       session_id: newSessionId,
       steps: [...sourceTrajectory.steps], // Copy all steps including history
@@ -352,17 +503,25 @@ export class ATIFConversationService {
         total_cost_usd: sourceTrajectory.final_metrics.total_cost_usd,
         total_steps: sourceTrajectory.final_metrics.total_steps,
       } : undefined,
-    };
+    });
 
     // Build insert data
     const insertData: {
       userId: number;
-      trajectory: ATIFTrajectory;
+      schemaVersion: string;
+      sessionId: string;
+      agent: ATIFTrajectory['agent'];
+      finalMetrics?: ATIFTrajectory['final_metrics'];
+      extra?: Record<string, unknown>;
       title?: string;
       chatModelId?: number;
     } = {
       userId: user.id,
-      trajectory: sanitizeForJsonb(newTrajectory),
+      schemaVersion: newTrajectory.schema_version,
+      sessionId: newTrajectory.session_id,
+      agent: newTrajectory.agent,
+      finalMetrics: newTrajectory.final_metrics,
+      extra: newTrajectory.extra,
     };
 
     if (title) {
@@ -380,17 +539,32 @@ export class ATIFConversationService {
     }, 'Forking conversation');
 
     try {
-      const [newConversation] = await db
-        .insert(Conversation)
-        .values(insertData)
-        .returning();
+      const newConversation = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(Conversation)
+          .values(insertData)
+          .returning();
 
-      if (!newConversation) {
-        throw new Error('Failed to fork conversation');
-      }
+        if (!created) {
+          throw new Error('Failed to fork conversation');
+        }
+
+        if (newTrajectory.steps.length > 0) {
+          await tx.insert(ConversationStep).values(newTrajectory.steps.map(step => ({
+            conversationId: created.id,
+            stepId: step.step_id,
+            source: step.source,
+            timestamp: getStepTimestamp(step),
+            messagePreview: getMessagePreview(step.message),
+            step,
+          })));
+        }
+
+        return created;
+      });
 
       log.debug({ conversationId: newConversation.id }, 'Conversation forked');
-      return newConversation as ConversationWithTrajectory;
+      return withTrajectory(newConversation, newTrajectory.steps);
     } catch (error) {
       log.error({ err: error }, 'Error forking conversation');
       throw error;

@@ -443,3 +443,44 @@ for (const reason of ['user_stop', 'error', 'disconnect'] as const) {
         expect(user?.isQueued).toBe(false);
     });
 }
+
+test('RUN_STOPPED (error) replaces an empty streaming placeholder with a run error card', () => {
+    const conversationId = 'c1';
+    const runningRunId = 'run-1';
+
+    const messages: Message[] = [
+        { id: 'cm-1', stableId: 'cm-1', role: 'user', content: 'what is on my plan?' },
+        { id: runningRunId, stableId: runningRunId, role: 'assistant', content: '', isStreaming: true },
+    ];
+
+    const state: ChatState = {
+        ...makeState({
+            conversationId,
+            messages,
+            conversationState: {
+                isProcessing: true,
+                isStopped: false,
+                isCompleted: false,
+                messages,
+            },
+        }),
+        runStatus: 'running',
+        currentRunId: runningRunId,
+    };
+
+    const next = __test__.chatReducer(state, {
+        type: 'RUN_STOPPED',
+        conversationId,
+        runId: runningRunId,
+        reason: 'error',
+        error: '{"error":{"message":"provider failed"}}',
+    });
+
+    expect(next.runStatus).toBe('stopped');
+    expect(next.currentRunId).toBeUndefined();
+    expect(next.messages.some(m => m.isStreaming)).toBe(false);
+    expect(next.messages.some(m => m.stableId === runningRunId)).toBe(false);
+    expect(next.messages).toHaveLength(2);
+    expect(next.messages[1]?.stableId).toBe(`run-error-${runningRunId}`);
+    expect(next.messages[1]?.runErrorInfo?.message).toContain('provider failed');
+});

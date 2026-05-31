@@ -31,6 +31,8 @@ export function AutomationsPage({
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [selectedAutomation, setSelectedAutomation] = useState<AutomationInfo | null>(null);
+    const [togglingAutomationIds, setTogglingAutomationIds] = useState<Set<string>>(() => new Set());
+    const [statusError, setStatusError] = useState<string | null>(null);
 
     useEffect(() => {
         fetchAutomations();
@@ -58,6 +60,7 @@ export function AutomationsPage({
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
+        setStatusError(null);
         try {
             await fetchAutomations();
         } finally {
@@ -80,6 +83,42 @@ export function AutomationsPage({
         setSelectedAutomation(null);
         handleRefresh();
         onAutomationChanged?.();
+    };
+
+    const handleToggleAutomationStatus = async (automation: AutomationInfo, status: 'active' | 'paused') => {
+        const previousStatus = automation.status;
+        setStatusError(null);
+        setTogglingAutomationIds((current) => new Set(current).add(automation.id));
+        setAutomations((current) => current.map((item) =>
+            item.id === automation.id ? { ...item, status } : item
+        ));
+
+        try {
+            const endpoint = status === 'paused'
+                ? `/api/automations/${automation.id}/pause`
+                : `/api/automations/${automation.id}/resume`;
+
+            const res = await apiFetch(endpoint, { method: 'POST' });
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                throw new Error(typeof data?.error === 'string' ? data.error : t('automations.failedToUpdateStatus'));
+            }
+
+            await fetchAutomations();
+            onAutomationChanged?.();
+        } catch (e) {
+            console.error('Failed to update automation status', e);
+            setStatusError(e instanceof Error ? e.message : t('automations.failedToUpdateStatus'));
+            setAutomations((current) => current.map((item) =>
+                item.id === automation.id ? { ...item, status: previousStatus } : item
+            ));
+        } finally {
+            setTogglingAutomationIds((current) => {
+                const next = new Set(current);
+                next.delete(automation.id);
+                return next;
+            });
+        }
     };
 
     if (isLoading) {
@@ -122,6 +161,8 @@ export function AutomationsPage({
                         </div>
                     </div>
 
+                    {statusError && <div className="automations-status-error form-error">{statusError}</div>}
+
                     {automations.length === 0 ? (
                         <AutomationsEmpty />
                     ) : (
@@ -132,6 +173,8 @@ export function AutomationsPage({
                                     automation={automation}
                                     pendingConfirmation={confirmationsByAutomation.get(automation.id)}
                                     onClick={() => setSelectedAutomation(automation)}
+                                    onToggleStatus={(status) => handleToggleAutomationStatus(automation, status)}
+                                    isToggling={togglingAutomationIds.has(automation.id)}
                                 />
                             ))}
                         </div>

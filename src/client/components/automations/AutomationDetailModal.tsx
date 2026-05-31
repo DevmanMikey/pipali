@@ -1,7 +1,7 @@
 // Modal for viewing, editing, and deleting an automation
 
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, Trash2, Play, Pause, Calendar, Clock, Pencil, Save, AlertCircle, Send, MessageSquare, Zap, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Loader2, Trash2, Calendar, Clock, Pencil, Save, AlertCircle, Send, MessageSquare, Zap, ChevronDown, ChevronRight } from 'lucide-react';
 import type { AutomationInfo, FrequencyType, DayOfWeek, AutomationPendingConfirmation } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
 import { DiffView } from '../tool-views/DiffView';
@@ -160,7 +160,6 @@ export function AutomationDetailModal({
 
     const [isEditing, setIsEditing] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    const [isToggling, setIsToggling] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isTriggering, setIsTriggering] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -188,29 +187,6 @@ export function AutomationDetailModal({
 
     const isActive = automation.status === 'active';
     const hasSchedule = automation.triggerType && automation.triggerConfig;
-
-    const handleToggleStatus = async () => {
-        setIsToggling(true);
-        setError(null);
-
-        try {
-            const endpoint = isActive
-                ? `/api/automations/${automation.id}/pause`
-                : `/api/automations/${automation.id}/resume`;
-
-            const res = await apiFetch(endpoint, { method: 'POST' });
-            if (res.ok) {
-                onUpdated();
-            } else {
-                const data = await res.json();
-                setError(typeof data.error === 'string' ? data.error : t('automations.failedToUpdateStatus'));
-            }
-        } catch (e) {
-            setError(t('automations.failedToUpdateStatus'));
-        } finally {
-            setIsToggling(false);
-        }
-    };
 
     const handleTrigger = async () => {
         setIsTriggering(true);
@@ -715,26 +691,6 @@ export function AutomationDetailModal({
                                     <span>{t('automations.view')}</span>
                                 </button>
                             )}
-                            <button
-                                type="button"
-                                onClick={handleToggleStatus}
-                                className={`btn-secondary ${isActive ? 'btn-pause' : 'btn-play'}`}
-                                disabled={isToggling}
-                            >
-                                {isToggling ? (
-                                    <Loader2 size={16} className="spinning" />
-                                ) : isActive ? (
-                                    <>
-                                        <Pause size={16} />
-                                        <span>{t('automations.pause')}</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Play size={16} />
-                                        <span>{t('automations.resume')}</span>
-                                    </>
-                                )}
-                            </button>
                             <button
                                 type="button"
                                 onClick={() => setIsEditing(true)}

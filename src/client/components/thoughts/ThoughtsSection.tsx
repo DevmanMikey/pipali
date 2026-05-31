@@ -71,6 +71,28 @@ function splitMultiHeadingThoughts(thoughts: Thought[]): Thought[] {
     return result;
 }
 
+export function getCollapsedPreviewThoughts(thoughts: Thought[]): Thought[] {
+    const latestToolCall = thoughts.findLast(thought => thought.type === 'tool_call');
+    if (!latestToolCall) return [];
+
+    const latestStepGroupId = latestToolCall.stepGroupId;
+    const stepThoughts = latestStepGroupId
+        ? thoughts.filter(thought => thought.stepGroupId === latestStepGroupId)
+        : thoughts.slice(thoughts.findLastIndex(thought => thought.type === 'tool_call'));
+
+    return stepThoughts
+        .filter(thought => thought.type === 'tool_call' || (thought.type === 'thought' && !thought.isInternalThought))
+        .map(thought => {
+            if (thought.type === 'tool_call' && thought.toolResult !== undefined) {
+                return {
+                    ...thought,
+                    toolResult: undefined,
+                };
+            }
+            return thought;
+        });
+}
+
 export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps) {
     const [expandLevel, setExpandLevel] = useState<ExpandLevel>(getStoredExpandLevel);
     // Per-item overrides: at level 1, toggled items show full; at level 2, toggled items show outline
@@ -102,14 +124,6 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
         }
         return map.size > 0 ? map : undefined;
     }, [thoughts]);
-
-    // Get the most recent thought/tool_call for streaming preview
-    const latestThought = thoughts.length > 0 ? thoughts[thoughts.length - 1] : null;
-
-    // Calculate the step number for a thought (position among tool_call thoughts)
-    const getStepNumber = (idx: number): number => {
-        return thoughts.slice(0, idx).filter(t => t.type === 'tool_call').length + 1;
-    };
 
     // Cycle: 0 → 1 → 2 → 0
     const cycleExpand = () => {
@@ -181,17 +195,28 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
                 </button>
             </div>
 
-            {/* Show streaming preview of latest thought when collapsed */}
-            {isStreaming && expandLevel === 0 && latestThought && (
-                <div className="thoughts-preview">
-                    <ThoughtItem
-                        thought={latestThought}
-                        stepNumber={getStepNumber(thoughts.length - 1)}
-                        isPreview={true}
-                        uidMap={uidMap}
-                    />
-                </div>
-            )}
+            {/* Show assistant-visible messages and tool calls while collapsed, without tool results */}
+            {isStreaming && expandLevel === 0 && (() => {
+                const previewThoughts = getCollapsedPreviewThoughts(splitMultiHeadingThoughts(thoughts));
+                let toolCallIndex = 0;
+                return previewThoughts.length > 0 ? (
+                    <div className="thoughts-preview">
+                        {previewThoughts.map((thought) => {
+                            const stepNumber = thought.type === 'tool_call' ? ++toolCallIndex : 0;
+                            return (
+                                <ThoughtItem
+                                    key={thought.id}
+                                    thought={thought}
+                                    stepNumber={stepNumber}
+                                    isPreview={true}
+                                    showResult={false}
+                                    uidMap={uidMap}
+                                />
+                            );
+                        })}
+                    </div>
+                ) : null;
+            })()}
 
             {/* Level 1: Outline - titles with category dots, no results */}
             {/* Level 2: Full - titles with category dots + tool results */}

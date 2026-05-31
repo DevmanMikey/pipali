@@ -156,6 +156,7 @@ export const Selectors = {
     automationSchedule: '.automation-schedule',
     automationNextRun: '.automation-next-run',
     automationStatusBadge: '.automation-status-badge',
+    automationToggleBtn: '.automation-toggle-btn',
     automationAwaitingConfirmation: '.automation-card.awaiting-confirmation',
 
     // Automation Detail Modal

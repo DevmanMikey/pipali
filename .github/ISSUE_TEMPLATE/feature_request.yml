@@ -1,0 +1,34 @@
+name: ✨ Feature Request
+description: Propose a new capability or improvement
+labels: ["enhance", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Please note our process: **open this request and wait for it to be triaged before writing any code.** Once a maintainer accepts it (the `triage` label is removed), anyone may open a PR — unless it's been assigned to a specific person. PRs against untriaged requests may be closed without review — this protects your time as much as ours.
+
+        Before filing, please [search existing issues](https://github.com/khoj-ai/pipali/issues?q=is%3Aissue).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the underlying need or pain point, not just the solution. The clearer the problem, the easier it is to evaluate.
+      placeholder: As a user, I can't ... which means ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Pipali to do?
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I understand I should wait for this request to be triaged (the `triage` label removed) before opening a PR.
+          required: true

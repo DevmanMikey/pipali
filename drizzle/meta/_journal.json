@@ -127,6 +127,27 @@
       "when": 1777631380949,
       "tag": "0017_fancy_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1777927070932,
+      "tag": "0018_salty_firebrand",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778762000000,
+      "tag": "0019_mcp_transport_http",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778763800000,
+      "tag": "0020_mcp_oauth",
+      "breakpoints": true
     }
   ]
 }

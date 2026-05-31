@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.2
+
+### 🧪 Improve
+- App loads faster and uses much less space
+- Pause or resume a routine directly from its card on the Routines page
+- Enable or disable an MCP server directly from its card on the Tools page
+- Refreshed tool card layout with clearer titles, status, and color-coded risk on the Tools page
+- Sharper trajectory preview that highlights the latest step's messages and tool calls
+- GPT models share progress updates more consistently during long-running jobs
+
+### 🛠️ Fix
+- Shell commands no longer break on literal `$` characters
+
 ## 0.5.1
 
 ### 🎁 New

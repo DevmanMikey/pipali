@@ -153,7 +153,14 @@ export class AutomationsPage {
      * Get automation card by status
      */
     getAutomationCardsByStatus(status: 'active' | 'paused' | 'error'): Locator {
-        return this.page.locator(`${Selectors.automationCard}:has(${Selectors.automationStatusBadge}:text-is("${status}"))`);
+        return this.page.locator(`${Selectors.automationCard}.${status}`);
+    }
+
+    /**
+     * Get automation card pause/resume toggle by automation name
+     */
+    getAutomationStatusButtonByName(name: string): Locator {
+        return this.getAutomationCardByName(name).locator(Selectors.automationToggleBtn);
     }
 
     /**
@@ -338,29 +345,24 @@ export class AutomationsPage {
     /**
      * Toggle automation status (pause/resume)
      */
-    async toggleStatus(): Promise<void> {
-        const toggleBtn = this.detailModal.locator('button:has-text("Pause"), button:has-text("Resume")');
-        await toggleBtn.click();
-        // Wait for modal to close after toggle
-        await this.detailModal.waitFor({ state: 'hidden', timeout: 5000 });
+    async toggleStatus(automationName: string): Promise<void> {
+        await this.getAutomationStatusButtonByName(automationName).click();
     }
 
     /**
      * Pause automation
      */
-    async pauseAutomation(): Promise<void> {
-        const pauseBtn = this.detailModal.locator('button:has-text("Pause")');
+    async pauseAutomation(automationName: string): Promise<void> {
+        const pauseBtn = this.getAutomationStatusButtonByName(automationName);
         await pauseBtn.click();
-        await this.detailModal.waitFor({ state: 'hidden', timeout: 5000 });
     }
 
     /**
      * Resume automation
      */
-    async resumeAutomation(): Promise<void> {
-        const resumeBtn = this.detailModal.locator('button:has-text("Resume")');
+    async resumeAutomation(automationName: string): Promise<void> {
+        const resumeBtn = this.getAutomationStatusButtonByName(automationName);
         await resumeBtn.click();
-        await this.detailModal.waitFor({ state: 'hidden', timeout: 5000 });
     }
 
     /**
@@ -410,9 +412,9 @@ export class AutomationsPage {
         for (let i = 0; i < count; i++) {
             const card = this.automationCards.nth(i);
             const name = await card.locator(Selectors.automationCardTitle).textContent();
-            const status = await card.locator(Selectors.automationStatusBadge).textContent();
-            if (name && status) {
-                automations.push({ name, status });
+            const className = await card.getAttribute('class');
+            if (name && className) {
+                automations.push({ name, status: className.includes('paused') ? 'paused' : 'active' });
             }
         }
 

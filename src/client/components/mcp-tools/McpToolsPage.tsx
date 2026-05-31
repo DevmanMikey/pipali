@@ -13,6 +13,7 @@ export function McpToolsPage() {
     const [servers, setServers] = useState<McpServerInfo[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isReloading, setIsReloading] = useState(false);
+    const [togglingServerIds, setTogglingServerIds] = useState<Set<number>>(() => new Set());
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [selectedServer, setSelectedServer] = useState<McpServerInfo | null>(null);
 
@@ -60,6 +61,43 @@ export function McpToolsPage() {
     const handleServerDeleted = () => {
         setSelectedServer(null);
         fetchServers();
+    };
+
+    const handleToggleServerEnabled = async (server: McpServerInfo, enabled: boolean) => {
+        setTogglingServerIds((current) => new Set(current).add(server.id));
+        setServers((current) => current.map((item) =>
+            item.id === server.id ? { ...item, enabled } : item
+        ));
+
+        try {
+            const res = await apiFetch(`/api/mcp/servers/${server.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled }),
+            });
+
+            if (!res.ok) {
+                throw new Error('Failed to update MCP server');
+            }
+
+            const data = await res.json();
+            if (data.server) {
+                setServers((current) => current.map((item) =>
+                    item.id === server.id ? { ...item, ...data.server } : item
+                ));
+            }
+        } catch (e) {
+            console.error('Failed to toggle MCP server', e);
+            setServers((current) => current.map((item) =>
+                item.id === server.id ? { ...item, enabled: server.enabled } : item
+            ));
+        } finally {
+            setTogglingServerIds((current) => {
+                const next = new Set(current);
+                next.delete(server.id);
+                return next;
+            });
+        }
     };
 
     if (isLoading) {
@@ -111,6 +149,8 @@ export function McpToolsPage() {
                                     key={server.id}
                                     server={server}
                                     onClick={() => setSelectedServer(server)}
+                                    onToggleEnabled={(enabled) => handleToggleServerEnabled(server, enabled)}
+                                    isToggling={togglingServerIds.has(server.id)}
                                 />
                             ))}
                         </div>

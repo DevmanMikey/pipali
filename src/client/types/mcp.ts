@@ -1,4 +1,6 @@
-export type McpTransportType = 'stdio' | 'sse';
+export type McpTransportType = 'stdio' | 'http';
+export type McpAuthType = 'none' | 'bearer' | 'oauth';
+export type McpOAuthStatus = 'not_connected' | 'auth_pending' | 'connected' | 'auth_required' | 'error';
 
 export type McpConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -16,6 +18,8 @@ export interface McpServerInfo {
     description?: string;
     transportType: McpTransportType;
     path: string;
+    authType: McpAuthType;
+    oauthStatus: McpOAuthStatus;
     apiKey?: string;
     env?: Record<string, string>;
     confirmationMode: McpConfirmationMode;
@@ -63,6 +67,7 @@ export interface CreateMcpServerInput {
     description?: string;
     transportType: McpTransportType;
     path: string;
+    authType?: McpAuthType;
     apiKey?: string;
     env?: Record<string, string>;
     confirmationMode?: McpConfirmationMode;
@@ -73,6 +78,7 @@ export interface UpdateMcpServerInput {
     description?: string;
     transportType?: McpTransportType;
     path?: string;
+    authType?: McpAuthType;
     apiKey?: string;
     env?: Record<string, string>;
     confirmationMode?: McpConfirmationMode;

@@ -49,6 +49,10 @@
     gap: 8px;
 }
 
+.automations-status-error {
+    margin-bottom: 16px;
+}
+
 .automations-create-btn {
     display: flex;
     align-items: center;
@@ -133,11 +137,10 @@
 }
 
 .automation-card.paused {
-    opacity: 0.7;
-    border-left: 3px solid var(--color-warning);
+    opacity: 0.55;
 }
 
-.automation-card-header {
+.automation-card-title-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -192,51 +195,57 @@
     border-color: #f59e0b;
 }
 
-.automation-card-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.automation-action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-8);
-    height: var(--space-8);
-    padding: 0;
-    background: transparent;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
+.automation-toggle-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    padding: 2px;
     cursor: pointer;
-    color: var(--color-text-muted);
-    transition: all var(--transition);
+    display: flex;
+    align-items: center;
 }
 
-.automation-action-btn:hover {
+.automation-toggle-btn:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.automation-toggle-track {
+    display: block;
+    width: 32px;
+    height: 18px;
+    border-radius: 9px;
     background: var(--color-bg-muted);
-    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    position: relative;
+    transition: background var(--transition), border-color var(--transition);
 }
 
-.automation-action-btn.pause:hover {
-    background: var(--color-warning-bg);
-    border-color: #fde68a;
-    color: var(--color-warning-text);
+.automation-toggle-on .automation-toggle-track {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
 }
 
-.automation-action-btn.play:hover {
-    background: var(--color-success-bg);
-    border-color: #bbf7d0;
-    color: var(--color-success-text);
+.automation-toggle-thumb {
+    display: block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--color-text-muted);
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform var(--transition), background var(--transition);
 }
 
-.automation-action-btn.delete:hover {
-    background: var(--color-error-bg);
-    border-color: var(--color-error-border);
-    color: var(--color-error-text);
+.automation-toggle-on .automation-toggle-thumb {
+    transform: translateX(14px);
+    background: var(--color-bg);
 }
 
 .automation-card-title {
+    flex: 1;
+    min-width: 0;
     font-size: 15px;
     font-weight: 500;
     color: var(--color-text);
@@ -660,24 +669,6 @@
     flex: 1;
 }
 
-.btn-pause {
-    color: #92400e;
-}
-
-.btn-pause:hover {
-    background: #fef3c7;
-    border-color: #fde68a;
-}
-
-.btn-play {
-    color: #166534;
-}
-
-.btn-play:hover {
-    background: #dcfce7;
-    border-color: #bbf7d0;
-}
-
 /* Automation Confirmation Section in Detail Modal */
 .automation-confirmation-section {
     background: linear-gradient(to right, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.02));
@@ -913,4 +904,3 @@
         text-align: center;
     }
 }
-

@@ -115,6 +115,118 @@
     color: var(--color-text);
 }
 
+.run-error-message {
+    background: var(--color-error-bg);
+    border: 1px solid var(--color-error-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-top: 8px;
+}
+
+.run-error-message-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.run-error-message-icon {
+    display: flex;
+    color: var(--color-error);
+}
+
+.run-error-message-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-error-text);
+}
+
+.run-error-message-icon-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.run-error-message-icon-button:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--color-text);
+}
+
+.run-error-message-text {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: var(--color-text);
+    line-height: 1.5;
+}
+
+.run-error-message-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.run-error-message-action,
+.run-error-message-details-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.run-error-message-action {
+    background: var(--color-error);
+    color: white;
+    border: none;
+}
+
+.run-error-message-action:hover {
+    background: var(--color-error-text);
+}
+
+.run-error-message-details-toggle {
+    background: transparent;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+}
+
+.run-error-message-details-toggle:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text);
+    border-color: var(--color-text-muted);
+}
+
+.run-error-message-details {
+    margin: 12px 0 0 0;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+}
+
 .message-content ::selection {
     background: var(--color-selection-bg);
     color: var(--color-selection-text);

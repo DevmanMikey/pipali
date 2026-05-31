@@ -70,9 +70,9 @@ The app has a navigation sidebar on the left and a main content area.
 - Routines allow user to assign scheduled tasks for you to work on or reusable prompts that they can trigger manually
 
 ### Tools Page
-- Add MCP servers (stdio or SSE transport). 
+- Add MCP servers (stdio or HTTP transport). 
 - Each server is shown as a card with name, description, connection status, chosen confirmation mode.
-- On opening server card user can edit server description, connection command (the command is called with bunx/uvx/no prefix auto inferred based on syntax), transport type (stdio, http/sse), confirmation mode (i.e if to request user confirmation (always, unsafe only, never) when you call the server tools), which tools from the mcp server to enable, test connection button
+- On opening server card user can edit server description, connection command (the command is called with bunx/uvx/no prefix auto inferred based on syntax), transport type (stdio, http/http), confirmation mode (i.e if to request user confirmation (always, unsafe only, never) when you call the server tools), which tools from the mcp server to enable, test connection button
 
 ### Skills Page
 View, create, update, delete skills

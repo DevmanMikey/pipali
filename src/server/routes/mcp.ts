@@ -1,16 +1,19 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
+import { auth as runMcpOAuth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { db } from '../db';
 import { McpServer } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import {
     loadEnabledMcpServers,
     reconnectMcpServer,
+    disconnectMcpServer,
     getMcpServerStatuses,
     closeMcpClients,
 } from '../processor/mcp';
-import { McpClient } from '../processor/mcp/client';
+import { McpClient, isMcpOAuthUnauthorizedError } from '../processor/mcp/client';
+import { clearMcpOAuthState, DbMcpOAuthProvider, getMcpOAuthState } from '../processor/mcp/oauth-provider';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'mcp' });
@@ -21,8 +24,9 @@ const mcp = new Hono();
 const createMcpServerSchema = z.object({
     name: z.string().min(1).max(64).regex(/^[a-z0-9_-]+$/, 'Name must be lowercase alphanumeric with dashes/underscores'),
     description: z.string().max(512).optional(),
-    transportType: z.enum(['stdio', 'sse']),
+    transportType: z.enum(['stdio', 'http']),
     path: z.string().min(1),
+    authType: z.enum(['none', 'bearer', 'oauth']).optional(),
     apiKey: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),
     confirmationMode: z.enum(['always', 'unsafe_only', 'never']).optional(),
@@ -31,6 +35,60 @@ const createMcpServerSchema = z.object({
 });
 
 const updateMcpServerSchema = createMcpServerSchema.partial().omit({ name: true });
+
+function getOrigin(requestUrl: string): string {
+    return new URL(requestUrl).origin;
+}
+
+function renderOAuthCallbackPage(title: string, message: string, success: boolean): Response {
+    const escapedTitle = title.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+    const escapedMessage = message.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+    return new Response(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${escapedTitle}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #1f2933; }
+    main { width: min(420px, calc(100vw - 32px)); background: white; border: 1px solid #dde3ea; border-radius: 8px; padding: 28px; box-shadow: 0 10px 30px rgba(16, 24, 40, 0.08); }
+    h1 { font-size: 20px; margin: 0 0 10px; }
+    p { margin: 0 0 20px; line-height: 1.5; color: #52606d; }
+    a { color: #2563eb; text-decoration: none; font-weight: 600; }
+    .status { color: ${success ? '#047857' : '#b42318'}; font-weight: 600; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="status">${success ? 'Connected' : 'Connection failed'}</div>
+    <h1>${escapedTitle}</h1>
+    <p>${escapedMessage}</p>
+    <a href="/tools">Return to Pipali Tools</a>
+  </main>
+</body>
+</html>`, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+}
+
+async function getFreshServer(id: number) {
+    const [server] = await db.select().from(McpServer).where(eq(McpServer.id, id));
+    return server;
+}
+
+async function startMcpOAuth(server: typeof McpServer.$inferSelect, callbackOrigin: string): Promise<string | undefined> {
+    try {
+        await reconnectMcpServer(server.name, {
+            oauthInteractive: true,
+            callbackOrigin,
+        });
+    } catch (error) {
+        if (!isMcpOAuthUnauthorizedError(error)) {
+            throw error;
+        }
+    }
+    const state = await getMcpOAuthState(server.id);
+    return state?.lastAuthorizationUrl ?? undefined;
+}
 
 // GET /api/mcp/servers - List all MCP servers
 mcp.get('/servers', async (c) => {
@@ -62,12 +120,17 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
     }
 
     try {
+        const authType = input.transportType === 'http'
+            ? input.authType ?? (input.apiKey ? 'bearer' : 'none')
+            : 'none';
         const results = await db.insert(McpServer).values({
             name: input.name,
             description: input.description,
             transportType: input.transportType,
             path: input.path,
-            apiKey: input.apiKey,
+            authType,
+            oauthStatus: authType === 'oauth' ? 'auth_pending' : 'not_connected',
+            apiKey: authType === 'bearer' ? input.apiKey : null,
             env: input.env,
             confirmationMode: input.confirmationMode ?? 'always',
             enabled: input.enabled ?? true,
@@ -82,9 +145,14 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
         log.info(`✅ Created MCP server "${input.name}" (id: ${server.id})`);
 
         // If enabled, connect to the server
+        let authorizationUrl: string | undefined;
         if (server.enabled) {
             try {
-                await reconnectMcpServer(server.name);
+                if (server.authType === 'oauth') {
+                    authorizationUrl = await startMcpOAuth(server, getOrigin(c.req.url));
+                } else {
+                    await reconnectMcpServer(server.name);
+                }
                 log.info(`🔗 Connected to MCP server "${server.name}"`);
             } catch (error) {
                 log.warn({ err: error }, 'Failed to connect to server');
@@ -95,7 +163,8 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
             }
         }
 
-        return c.json({ success: true, server });
+        const freshServer = await getFreshServer(server.id);
+        return c.json({ success: true, server: freshServer ?? server, authorizationUrl });
     } catch (error) {
         log.error({ err: error }, 'Failed to create server');
         return c.json({ error: 'Failed to create MCP server' }, 500);
@@ -145,9 +214,23 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
         // Build update object with only defined fields
         const updateData: Record<string, unknown> = { updatedAt: new Date() };
         if (input.description !== undefined) updateData.description = input.description;
+        const nextTransportType = input.transportType ?? existing.transportType;
+        const nextAuthType = nextTransportType === 'http'
+            ? input.authType ?? existing.authType ?? (existing.apiKey ? 'bearer' : 'none')
+            : 'none';
+
         if (input.transportType !== undefined) updateData.transportType = input.transportType;
         if (input.path !== undefined) updateData.path = input.path;
-        if (input.apiKey !== undefined) updateData.apiKey = input.apiKey;
+        if (input.authType !== undefined || input.transportType !== undefined) {
+            updateData.authType = nextAuthType;
+            updateData.oauthStatus = nextAuthType === 'oauth' ? 'auth_pending' : 'not_connected';
+            if (nextAuthType !== 'bearer') {
+                updateData.apiKey = null;
+            }
+        }
+        if (nextAuthType === 'bearer' && input.apiKey !== undefined) {
+            updateData.apiKey = input.apiKey;
+        }
         if (input.env !== undefined) updateData.env = input.env;
         if (input.confirmationMode !== undefined) updateData.confirmationMode = input.confirmationMode;
         if (input.enabled !== undefined) updateData.enabled = input.enabled;
@@ -163,9 +246,18 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
             return c.json({ error: 'Failed to update MCP server' }, 500);
         }
 
+        if (existing.authType === 'oauth' && updated.authType !== 'oauth') {
+            await clearMcpOAuthState(updated.id);
+            await db
+                .update(McpServer)
+                .set({ oauthStatus: 'not_connected', updatedAt: new Date() })
+                .where(eq(McpServer.id, updated.id));
+            updated.oauthStatus = 'not_connected';
+        }
+
         log.info(`✅ Updated MCP server "${updated.name}"`);
 
-        // Reconnect if enabled
+        // Match the active client registry to the updated enabled state.
         if (updated.enabled) {
             try {
                 await reconnectMcpServer(updated.name);
@@ -173,12 +265,126 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
             } catch (error) {
                 log.warn({ err: error }, 'Failed to reconnect');
             }
+        } else {
+            await disconnectMcpServer(updated.name);
+            log.info(`Disconnected disabled MCP server "${updated.name}"`);
         }
 
-        return c.json({ success: true, server: updated });
+        const statuses = getMcpServerStatuses();
+        const status = statuses.find(s => s.name === updated.name);
+
+        return c.json({
+            success: true,
+            server: {
+                ...updated,
+                connectionStatus: status?.status || 'disconnected',
+            }
+        });
     } catch (error) {
         log.error({ err: error }, 'Failed to update server');
         return c.json({ error: 'Failed to update MCP server' }, 500);
+    }
+});
+
+// POST /api/mcp/servers/:id/oauth/reconnect - Start a fresh OAuth flow for an MCP server
+mcp.post('/servers/:id/oauth/reconnect', async (c) => {
+    const id = parseInt(c.req.param('id'));
+    if (isNaN(id)) {
+        return c.json({ error: 'Invalid server ID' }, 400);
+    }
+
+    const server = await getFreshServer(id);
+    if (!server) {
+        return c.json({ error: 'MCP server not found' }, 404);
+    }
+    if (server.authType !== 'oauth') {
+        return c.json({ error: 'MCP server is not configured for OAuth' }, 400);
+    }
+
+    try {
+        await disconnectMcpServer(server.name);
+        await clearMcpOAuthState(server.id);
+        await db
+            .update(McpServer)
+            .set({
+                oauthStatus: 'auth_pending',
+                lastError: 'OAuth authorization is required. Complete the browser sign-in flow to connect this MCP server.',
+                updatedAt: new Date(),
+            })
+            .where(eq(McpServer.id, server.id));
+
+        const authorizationUrl = await startMcpOAuth(server, getOrigin(c.req.url));
+        const freshServer = await getFreshServer(server.id);
+        return c.json({ success: true, server: freshServer ?? server, authorizationUrl });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        await db
+            .update(McpServer)
+            .set({ oauthStatus: 'error', lastError: errorMessage, updatedAt: new Date() })
+            .where(eq(McpServer.id, server.id));
+        return c.json({ success: false, error: errorMessage }, 500);
+    }
+});
+
+// GET /api/mcp/oauth/callback - Complete an MCP OAuth authorization code flow
+mcp.get('/oauth/callback', async (c) => {
+    const serverId = parseInt(c.req.query('server_id') ?? '');
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    const error = c.req.query('error');
+    const errorDescription = c.req.query('error_description');
+
+    if (isNaN(serverId)) {
+        return renderOAuthCallbackPage('Invalid MCP OAuth callback', 'The callback did not include a valid MCP server ID.', false);
+    }
+
+    const server = await getFreshServer(serverId);
+    if (!server) {
+        return renderOAuthCallbackPage('MCP server not found', 'Pipali could not find the MCP server for this OAuth callback.', false);
+    }
+
+    if (error) {
+        const message = errorDescription || error;
+        await db
+            .update(McpServer)
+            .set({ oauthStatus: 'auth_required', lastError: message, updatedAt: new Date() })
+            .where(eq(McpServer.id, server.id));
+        return renderOAuthCallbackPage(`Could not connect ${server.name}`, message, false);
+    }
+
+    if (!code || !state) {
+        return renderOAuthCallbackPage(`Could not connect ${server.name}`, 'The OAuth callback was missing a code or state.', false);
+    }
+
+    const storedState = await getMcpOAuthState(server.id);
+    if (!storedState?.state || storedState.state !== state) {
+        await db
+            .update(McpServer)
+            .set({ oauthStatus: 'auth_required', lastError: 'OAuth state mismatch. Please reconnect the MCP server.', updatedAt: new Date() })
+            .where(eq(McpServer.id, server.id));
+        return renderOAuthCallbackPage(`Could not connect ${server.name}`, 'OAuth state mismatch. Please reconnect the MCP server.', false);
+    }
+
+    try {
+        const provider = new DbMcpOAuthProvider(server, { callbackOrigin: getOrigin(c.req.url) });
+        await runMcpOAuth(provider, {
+            serverUrl: server.path,
+            authorizationCode: code,
+        });
+        await db
+            .update(McpServer)
+            .set({ oauthStatus: 'connected', lastError: null, updatedAt: new Date() })
+            .where(eq(McpServer.id, server.id));
+        await reconnectMcpServer(server.name, { oauthInteractive: false, callbackOrigin: getOrigin(c.req.url) });
+        return renderOAuthCallbackPage(`${server.name} connected`, 'OAuth authorization completed. You can return to Pipali.', true);
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.error({ err, server: server.name }, 'Failed to complete MCP OAuth callback');
+        await db
+            .update(McpServer)
+            .set({ oauthStatus: 'auth_required', lastError: message, updatedAt: new Date() })
+            .where(eq(McpServer.id, server.id));
+        return renderOAuthCallbackPage(`Could not connect ${server.name}`, message, false);
     }
 });
 
@@ -246,8 +452,11 @@ mcp.post('/servers/:id/test', async (c) => {
         log.error({ err: errorMessage }, 'Connection test failed');
 
         // Update last error
+        const oauthUpdate = server.authType === 'oauth'
+            ? { oauthStatus: 'auth_required' as const }
+            : {};
         await db.update(McpServer)
-            .set({ lastError: errorMessage })
+            .set({ lastError: errorMessage, ...oauthUpdate })
             .where(eq(McpServer.id, id));
 
         return c.json({ success: false, error: errorMessage }, 500);

@@ -88,21 +88,22 @@ test.describe('Automations Page', () => {
             expect(count).toBeGreaterThanOrEqual(2);
         });
 
-        test('should display automation with correct status badge', async () => {
+        test('should display automation with active toggle', async () => {
             const automationId = await automationsPage.createAutomationViaAPI({
-                name: 'Status Badge Test',
+                name: 'Status Toggle Test',
                 prompt: 'Test prompt for status',
             });
             testAutomationIds.push(automationId);
 
             await automationsPage.goto();
 
-            const automationCard = automationsPage.getAutomationCardByName('Status Badge Test');
+            const automationCard = automationsPage.getAutomationCardByName('Status Toggle Test');
             await expect(automationCard).toBeVisible();
 
             // New automations are active by default
-            const statusBadge = automationCard.locator(Selectors.automationStatusBadge);
-            await expect(statusBadge).toHaveText('active');
+            const statusToggle = automationCard.locator(Selectors.automationToggleBtn);
+            await expect(statusToggle).toHaveAttribute('aria-checked', 'true');
+            await expect(automationCard).not.toHaveClass(/paused/);
         });
 
         test('should display schedule information on automation card', async () => {
@@ -483,20 +484,25 @@ test.describe('Automations Page', () => {
             testAutomationIds.push(automationId);
 
             await automationsPage.goto();
-            await automationsPage.openAutomationDetail('Pause Test');
 
             // Should be active initially
-            let status = await automationsPage.getDetailStatus();
-            expect(status).toBe('active');
-
-            // Pause it
-            await automationsPage.pauseAutomation();
-
-            // Reload and verify
-            await automationsPage.reloadAutomations();
             const card = automationsPage.getAutomationCardByName('Pause Test');
-            const badge = card.locator(Selectors.automationStatusBadge);
-            await expect(badge).toHaveText('paused');
+            const toggle = card.locator(Selectors.automationToggleBtn);
+            await expect(toggle).toHaveAttribute('aria-checked', 'true');
+            await expect(card).not.toHaveClass(/paused/);
+
+            // Pause it from the card without opening details.
+            const pauseResponsePromise = automationsPage.page.waitForResponse((response) =>
+                response.url().includes(`/api/automations/${automationId}/pause`) && response.request().method() === 'POST'
+            );
+            await automationsPage.pauseAutomation('Pause Test');
+            const pauseResponse = await pauseResponsePromise;
+            expect(pauseResponse.ok()).toBe(true);
+            await expect(automationsPage.detailModal).not.toBeVisible();
+
+            await automationsPage.reloadAutomations();
+            await expect(toggle).toHaveAttribute('aria-checked', 'false');
+            await expect(card).toHaveClass(/paused/);
         });
 
         test('should resume paused automation', async () => {
@@ -510,16 +516,48 @@ test.describe('Automations Page', () => {
             await automationsPage.page.request.post(`/api/automations/${automationId}/pause`);
 
             await automationsPage.goto();
-            await automationsPage.openAutomationDetail('Resume Test');
 
-            // Resume it
-            await automationsPage.resumeAutomation();
+            // Resume it from the card without opening details.
+            const resumeResponsePromise = automationsPage.page.waitForResponse((response) =>
+                response.url().includes(`/api/automations/${automationId}/resume`) && response.request().method() === 'POST'
+            );
+            await automationsPage.resumeAutomation('Resume Test');
+            const resumeResponse = await resumeResponsePromise;
+            expect(resumeResponse.ok()).toBe(true);
+            await expect(automationsPage.detailModal).not.toBeVisible();
 
-            // Reload and verify
             await automationsPage.reloadAutomations();
             const card = automationsPage.getAutomationCardByName('Resume Test');
-            const badge = card.locator(Selectors.automationStatusBadge);
-            await expect(badge).toHaveText('active');
+            const toggle = card.locator(Selectors.automationToggleBtn);
+            await expect(toggle).toHaveAttribute('aria-checked', 'true');
+            await expect(card).not.toHaveClass(/paused/);
+        });
+
+        test('should show an error and revert when status update fails', async () => {
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Toggle Failure Test',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+
+            await automationsPage.goto();
+            await automationsPage.page.route(`**/api/automations/${automationId}/pause`, async (route) => {
+                await route.fulfill({
+                    status: 500,
+                    contentType: 'application/json',
+                    body: JSON.stringify({ error: 'Cannot pause right now' }),
+                });
+            });
+
+            const card = automationsPage.getAutomationCardByName('Toggle Failure Test');
+            const toggle = card.locator(Selectors.automationToggleBtn);
+            await expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+            await automationsPage.pauseAutomation('Toggle Failure Test');
+
+            await expect(automationsPage.page.locator('.automations-status-error')).toHaveText('Cannot pause right now');
+            await expect(toggle).toHaveAttribute('aria-checked', 'true');
+            await expect(card).not.toHaveClass(/paused/);
         });
     });
 

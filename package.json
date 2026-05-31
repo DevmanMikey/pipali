@@ -1,6 +1,6 @@
 {
   "name": "pipali",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Personal AI for knowledge work. Make work easy.",
   "module": "index.ts",
   "type": "module",
