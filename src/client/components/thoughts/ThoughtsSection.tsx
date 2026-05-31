@@ -1,7 +1,7 @@
 // Expandable thoughts section showing AI reasoning and tool calls
 // Uses org-mode S-TAB style 3-level cycling: Collapsed → Outline → Full → Collapsed
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, ChevronUp, Globe, FileSearch, Pencil, Terminal, Wrench } from 'lucide-react';
 import type { Thought } from '../../types';
 import { ThoughtItem } from './ThoughtItem';
@@ -97,6 +97,7 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
     const [expandLevel, setExpandLevel] = useState<ExpandLevel>(getStoredExpandLevel);
     // Per-item overrides: at level 1, toggled items show full; at level 2, toggled items show outline
     const [toggledItems, setToggledItems] = useState<Set<string>>(new Set());
+    const previewRef = useRef<HTMLDivElement>(null);
 
     const toggleItem = useCallback((id: string) => {
         setToggledItems(prev => {
@@ -124,6 +125,18 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
         }
         return map.size > 0 ? map : undefined;
     }, [thoughts]);
+
+    const collapsedPreviewThoughts = useMemo(() => (
+        isStreaming && expandLevel === 0
+            ? getCollapsedPreviewThoughts(splitMultiHeadingThoughts(thoughts))
+            : []
+    ), [expandLevel, isStreaming, thoughts]);
+
+    useEffect(() => {
+        const preview = previewRef.current;
+        if (!preview || collapsedPreviewThoughts.length === 0) return;
+        preview.scrollTop = preview.scrollHeight;
+    }, [collapsedPreviewThoughts]);
 
     // Cycle: 0 → 1 → 2 → 0
     const cycleExpand = () => {
@@ -196,12 +209,11 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
             </div>
 
             {/* Show assistant-visible messages and tool calls while collapsed, without tool results */}
-            {isStreaming && expandLevel === 0 && (() => {
-                const previewThoughts = getCollapsedPreviewThoughts(splitMultiHeadingThoughts(thoughts));
+            {collapsedPreviewThoughts.length > 0 && (() => {
                 let toolCallIndex = 0;
-                return previewThoughts.length > 0 ? (
-                    <div className="thoughts-preview">
-                        {previewThoughts.map((thought) => {
+                return (
+                    <div className="thoughts-preview" ref={previewRef}>
+                        {collapsedPreviewThoughts.map((thought) => {
                             const stepNumber = thought.type === 'tool_call' ? ++toolCallIndex : 0;
                             return (
                                 <ThoughtItem
@@ -215,7 +227,7 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
                             );
                         })}
                     </div>
-                ) : null;
+                );
             })()}
 
             {/* Level 1: Outline - titles with category dots, no results */}
