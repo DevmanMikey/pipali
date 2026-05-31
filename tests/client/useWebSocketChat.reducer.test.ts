@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
-import { __test__ } from '../../src/client/hooks/useWebSocketChat';
-import type { ConversationState, Message, ChatState } from '../../src/client/types';
+import { __test__, type ChatState } from '../../src/client/hooks/useWebSocketChat';
+import type { ConversationState, Message } from '../../src/client/types';
 import { generateDeterministicId } from '../../src/client/utils/formatting';
 
 function makeState(params: {
@@ -84,7 +84,7 @@ test('RUN_COMPLETE appends assistant with stepId stableId when missing', () => {
 });
 
 test('SET_CONVERSATION_ID switches visible messages to target conversation', () => {
-    const state = {
+    const state: ChatState = {
         ...__test__.initialState,
         conversationId: 'a',
         messages: [{ id: 'm1', stableId: 'm1', role: 'assistant', content: 'from a' }],
@@ -102,7 +102,7 @@ test('SET_CONVERSATION_ID switches visible messages to target conversation', () 
 });
 
 test('SET_CONVERSATION_ID clears visible messages when target has no cached state', () => {
-    const state = {
+    const state: ChatState = {
         ...__test__.initialState,
         conversationId: 'a',
         messages: [{ id: 'm1', stableId: 'm1', role: 'assistant', content: 'from a' }],

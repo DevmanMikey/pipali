@@ -21,6 +21,7 @@ import type { Message, Thought, ConversationState, ConfirmationRequest, Confirma
 import { acquireWakeLock, releaseWakeLock } from '../utils/tauri';
 import { formatToolCallsForSidebar, generateUUID, generateDeterministicId } from '../utils/formatting';
 import { trimHistoryTailAfterUser, mergeHistoryWithLive } from '../utils/chat-messages';
+import { useReadableTextStream } from './useReadableTextStream';
 
 // ============================================================================
 // Types
@@ -1395,6 +1396,11 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     const observedConversationsRef = useRef<Set<string>>(new Set());
     const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    const dispatchTextDelta = useCallback((args: { conversationId: string; runId: string; delta: string }) => {
+        dispatch({ type: 'TEXT_DELTA', ...args });
+    }, []);
+    const { enqueueDelta, flushRun, clearRun } = useReadableTextStream(dispatchTextDelta);
+
     const callbacksRef = useRef<Pick<
         UseWebSocketChatOptions,
         | 'onConversationCreated'
@@ -1487,6 +1493,10 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'run_stopped':
+                // Preserve useful partial output for visible stops/disconnects, but avoid
+                // flashing delayed provider output immediately before an error card.
+                if (message.reason === 'error') clearRun(convId, runId);
+                else flushRun(convId, runId);
                 dispatch({
                     type: 'RUN_STOPPED',
                     conversationId: convId,
@@ -1501,6 +1511,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'run_complete':
+                flushRun(convId, runId);
                 dispatch({
                     type: 'RUN_COMPLETE',
                     conversationId: convId,
@@ -1513,15 +1524,13 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'text_delta':
-                dispatch({
-                    type: 'TEXT_DELTA',
-                    conversationId: convId,
-                    runId,
-                    delta: message.data.delta,
-                });
+                enqueueDelta(convId, runId, message.data.delta);
                 break;
 
             case 'step_start':
+                if (message.data.message && (message.data.toolCalls || []).length > 0) {
+                    clearRun(convId, runId);
+                }
                 dispatch({
                     type: 'STEP_START',
                     conversationId: convId,
@@ -1585,11 +1594,13 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'billing_error':
+                if (convId && runId) clearRun(convId, runId);
                 dispatch({ type: 'BILLING_ERROR', conversationId: convId, runId, error: message.error });
                 onBillingErrorCb?.(message.error, convId);
                 break;
 
             case 'auth_error':
+                if (convId && runId) clearRun(convId, runId);
                 dispatch({ type: 'AUTH_ERROR', conversationId: convId, runId, error: message.error });
                 onAuthErrorCb?.(message.error, convId);
                 break;
@@ -1621,7 +1632,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 }
                 break;
         }
-    }, []);
+    }, [clearRun, enqueueDelta, flushRun]);
 
     // Connect to WebSocket
     const connect = useCallback(() => {
@@ -1723,11 +1734,14 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     const stop = useCallback((conversationId: string, runId?: string, options?: StopOptions) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
+        const effectiveRunId = runId || state.currentRunId || '';
+
         if (options?.optimistic) {
+            if (effectiveRunId) flushRun(conversationId, effectiveRunId);
             dispatch({
                 type: 'RUN_STOPPED',
                 conversationId,
-                runId: runId || state.currentRunId || '',
+                runId: effectiveRunId,
                 reason: options.reason ?? 'user_stop',
             });
             dispatch({ type: 'CLEAR_CONFIRMATIONS', conversationId });
@@ -1738,7 +1752,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
             conversationId,
             runId,
         }));
-    }, [state.currentRunId]);
+    }, [flushRun, state.currentRunId]);
 
     const respondToConfirmation = useCallback((
         conversationId: string,
