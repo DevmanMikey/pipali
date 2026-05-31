@@ -27,7 +27,6 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
     const messageRefsMap = useRef<Map<number, HTMLElement>>(new Map());
     const previousConversationIdRef = useRef<string | undefined>(undefined);
     const previousMessagesLengthRef = useRef<number>(0);
-    const previousThoughtsLengthRef = useRef<number>(0);
     // Track if user is near bottom (updated on scroll events)
     const isNearBottomRef = useRef<boolean>(true);
     // While a freshly loaded conversation's content is still settling (markdown,
@@ -50,10 +49,6 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
         () => messages.map((_, i) => i),
         [messages.length]
     );
-
-    // Get the streaming message's thoughts count
-    const streamingMessage = messages.find(msg => msg.role === 'assistant' && msg.isStreaming);
-    const currentThoughtsLength = streamingMessage?.thoughts?.length ?? 0;
 
     // Track scroll position to detect if user is near bottom
     const handleScroll = useCallback(() => {
@@ -101,18 +96,7 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
         }
 
         if (isFreshLoad) {
-            // Opening an actively streaming conversation: follow the growing
-            // content to the bottom. Pinning to the last user message here
-            // would leave newly-arriving thoughts below the fold.
-            if (streamingMessage) {
-                isNearBottomRef.current = true;
-                requestAnimationFrame(() => {
-                    const container = mainContentRef.current;
-                    if (container) container.scrollTop = container.scrollHeight;
-                });
-                return;
-            }
-            // Completed conversation: anchor on last user message. Markdown,
+            // Anchor on last user message. Markdown,
             // KaTeX and images settle over several frames — for very long
             // conversations, over several seconds — so a single RAF scroll
             // lands on a pre-final height and the viewport ends up blank
@@ -150,29 +134,7 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
         }
     }, [conversationId, messages.length]);
 
-    // Scroll when thoughts are added during streaming.
-    // The ResizeObserver handles height-based scrolling well for level 2 (full results),
-    // but at level 1 (outline) new thoughts add minimal height and STEP_END produces
-    // zero height change (results are hidden), so we need an explicit scroll trigger.
-    useEffect(() => {
-        const prevThoughtsLength = previousThoughtsLengthRef.current;
-        previousThoughtsLengthRef.current = currentThoughtsLength;
-
-        if (currentThoughtsLength > prevThoughtsLength && isNearBottomRef.current) {
-            const container = mainContentRef.current;
-            requestAnimationFrame(() => {
-                if (prevThoughtsLength === 0) {
-                    lastUserMessageRef.current?.scrollIntoView({ behavior: 'smooth' });
-                } else if (container) {
-                    container.scrollTop = container.scrollHeight;
-                }
-            });
-        }
-    }, [currentThoughtsLength]);
-
-    // Auto-scroll when content height grows during streaming.
-    // Tool call results and expanded thoughts change DOM height without changing
-    // messages.length or currentThoughtsLength, so the above effects miss them.
+    // Keep fresh-load anchoring stable while content height settles.
     useEffect(() => {
         const container = mainContentRef.current;
         const messagesEl = messagesRef.current;
@@ -212,15 +174,6 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
                     stableTimer = null;
                 }, 1500);
                 return;
-            }
-            if (isNearBottomRef.current) {
-                // Defer scroll to after paint so hit-test coordinates stay in sync
-                // with visual positions. Synchronous scrollTop updates during layout
-                // can desync the compositor, making buttons visually offset from their
-                // actual clickable area until the next repaint.
-                requestAnimationFrame(() => {
-                    container.scrollTop = container.scrollHeight;
-                });
             }
         });
         observer.observe(messagesEl);
