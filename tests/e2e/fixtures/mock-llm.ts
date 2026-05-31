@@ -171,6 +171,30 @@ export function simpleResponseNoTools(): MockScenario {
     };
 }
 
+export function scrollBehaviorSetupScenario(): MockScenario {
+    return {
+        name: 'scroll-behavior-setup',
+        queryPattern: '^scroll behavior setup$',
+        iterations: [],
+        finalResponse: Array.from({ length: 50 }, (_, i) =>
+            `Setup paragraph ${i + 1}: this response is intentionally long so the next user turn starts after a tall assistant message.`
+        ).join('\n\n'),
+        iterationDelayMs: 0,
+    };
+}
+
+export function scrollBehaviorFollowupScenario(): MockScenario {
+    return {
+        name: 'scroll-behavior-followup',
+        queryPattern: '^scroll behavior follow up$',
+        iterations: [],
+        finalResponse: Array.from({ length: 24 }, (_, i) =>
+            `Follow-up paragraph ${i + 1}: this response is long enough to create real scroll space below the follow-up user message.`
+        ).join('\n\n'),
+        iterationDelayMs: 0,
+    };
+}
+
 /**
  * Create a shell command scenario that triggers shell_command with confirmation
  */
@@ -522,6 +546,8 @@ export const defaultMockScenarios: MockScenario[] = [
     slowPausableScenario(),
     quickScenario(),
     simpleResponseNoTools(),
+    scrollBehaviorSetupScenario(),
+    scrollBehaviorFollowupScenario(),
     shellCommandScenario(),
     readWriteShellCommandScenario(),
     writeFileScenario(),

@@ -122,6 +122,18 @@ export interface RunCompleteMessage {
 }
 
 /**
+ * Run lifecycle - partial text delta for real-time streaming
+ */
+export interface TextDeltaMessage {
+    type: 'text_delta';
+    conversationId: string;
+    runId: string;
+    data: {
+        delta: string;
+    };
+}
+
+/**
  * Step lifecycle - step started (preview of what's about to execute)
  */
 export interface StepStartMessage {
@@ -264,6 +276,7 @@ export type ServerMessage =
     | RunStartedMessage
     | RunStoppedMessage
     | RunCompleteMessage
+    | TextDeltaMessage
     | StepStartMessage
     | StepEndMessage
     | ConfirmationRequestMessage

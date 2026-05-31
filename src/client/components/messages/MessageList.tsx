@@ -27,9 +27,10 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
     const messageRefsMap = useRef<Map<number, HTMLElement>>(new Map());
     const previousConversationIdRef = useRef<string | undefined>(undefined);
     const previousMessagesLengthRef = useRef<number>(0);
-    const previousThoughtsLengthRef = useRef<number>(0);
-    // Track if user is near bottom (updated on scroll events)
-    const isNearBottomRef = useRef<boolean>(true);
+    const previousLastUserStableIdRef = useRef<string | undefined>(undefined);
+    const previousHasStreamingAssistantRef = useRef(false);
+    const previousThoughtsLengthRef = useRef(0);
+    const turnScrollInProgressRef = useRef(false);
     // While a freshly loaded conversation's content is still settling (markdown,
     // KaTeX, images resolve after mount), keep re-anchoring the viewport on the
     // last user message instead of auto-scrolling to bottom.
@@ -44,6 +45,10 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
 
     // Find the index of the last user message
     const lastUserMessageIndex = messages.findLastIndex(msg => msg.role === 'user');
+    const lastUserStableId = lastUserMessageIndex >= 0 ? messages[lastUserMessageIndex]?.stableId : undefined;
+    const streamingMessage = messages.find(msg => msg.role === 'assistant' && msg.isStreaming);
+    const hasStreamingAssistant = !!streamingMessage;
+    const currentThoughtsLength = streamingMessage?.thoughts?.length ?? 0;
 
     // All message indices for the navigator
     const messageIndices = useMemo(
@@ -51,11 +56,7 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
         [messages.length]
     );
 
-    // Get the streaming message's thoughts count
-    const streamingMessage = messages.find(msg => msg.role === 'assistant' && msg.isStreaming);
-    const currentThoughtsLength = streamingMessage?.thoughts?.length ?? 0;
-
-    // Track scroll position to detect if user is near bottom
+    // Track scrolls that should cancel fresh-load anchoring.
     const handleScroll = useCallback(() => {
         const container = mainContentRef.current;
         if (!container) return;
@@ -69,9 +70,53 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
                 freshLoadExpectedScrollTopRef.current = null;
             }
         }
-        const threshold = 150;
-        isNearBottomRef.current = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
     }, []);
+
+    const cancelScrollTrackingForUserInput = useCallback(() => {
+        freshLoadInProgressRef.current = false;
+        freshLoadAnchorOffsetRef.current = null;
+        freshLoadExpectedScrollTopRef.current = null;
+        turnScrollInProgressRef.current = false;
+    }, []);
+
+    const getLastUserTargetScrollTop = useCallback(() => {
+        const anchor = lastUserMessageRef.current;
+        const container = mainContentRef.current;
+        const messagesEl = messagesRef.current;
+        if (!anchor || !container || !messagesEl) return null;
+
+        const paddingTop = Number.parseFloat(getComputedStyle(messagesEl).paddingTop) || 0;
+        const anchorRect = anchor.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        return Math.max(0, container.scrollTop + anchorRect.top - containerRect.top - paddingTop);
+    }, []);
+
+    const scrollLastUserTowardTurnStart = useCallback((behavior: ScrollBehavior, afterScroll?: () => void) => {
+        const container = mainContentRef.current;
+        const targetScrollTop = getLastUserTargetScrollTop();
+        if (!container || targetScrollTop === null) return;
+
+        const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        const nextScrollTop = Math.min(targetScrollTop, maxScrollTop);
+
+        if (nextScrollTop <= container.scrollTop + 1) {
+            if (container.scrollTop >= targetScrollTop - 1) {
+                turnScrollInProgressRef.current = false;
+            }
+            afterScroll?.();
+            return;
+        }
+
+        container.scrollTo({ top: nextScrollTop, behavior });
+        if (nextScrollTop >= targetScrollTop - 1) {
+            turnScrollInProgressRef.current = false;
+        }
+        afterScroll?.();
+    }, [getLastUserTargetScrollTop]);
+
+    const scheduleScrollLastUserTowardTurnStart = useCallback((behavior: ScrollBehavior, afterScroll?: () => void) => {
+        requestAnimationFrame(() => scrollLastUserTowardTurnStart(behavior, afterScroll));
+    }, [scrollLastUserTowardTurnStart]);
 
     // Set up scroll listener
     useEffect(() => {
@@ -84,11 +129,35 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
         }
     }, [handleScroll]);
 
+    useEffect(() => {
+        const container = mainContentRef.current;
+        if (!container) return;
+
+        const onKeyDown = (event: KeyboardEvent) => {
+            const target = event.target instanceof HTMLElement ? event.target : null;
+            if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+            if (['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(event.key)) {
+                cancelScrollTrackingForUserInput();
+            }
+        };
+
+        container.addEventListener('wheel', cancelScrollTrackingForUserInput, { passive: true });
+        container.addEventListener('touchstart', cancelScrollTrackingForUserInput, { passive: true });
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            container.removeEventListener('wheel', cancelScrollTrackingForUserInput);
+            container.removeEventListener('touchstart', cancelScrollTrackingForUserInput);
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    }, [cancelScrollTrackingForUserInput]);
+
     // Scroll to last user message when conversation messages are freshly loaded
-    // or when a new message is sent while near the bottom
+    // or when a new user turn is sent.
     useEffect(() => {
         const prevLength = previousMessagesLengthRef.current;
+        const prevLastUserStableId = previousLastUserStableIdRef.current;
         previousMessagesLengthRef.current = messages.length;
+        previousLastUserStableIdRef.current = lastUserStableId;
 
         // Scroll on first render of a populated conversation -
         // either the initial load (empty to non-empty)
@@ -98,21 +167,11 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
 
         if (isNewConversation) {
             previousConversationIdRef.current = conversationId;
+            turnScrollInProgressRef.current = false;
         }
 
         if (isFreshLoad) {
-            // Opening an actively streaming conversation: follow the growing
-            // content to the bottom. Pinning to the last user message here
-            // would leave newly-arriving thoughts below the fold.
-            if (streamingMessage) {
-                isNearBottomRef.current = true;
-                requestAnimationFrame(() => {
-                    const container = mainContentRef.current;
-                    if (container) container.scrollTop = container.scrollHeight;
-                });
-                return;
-            }
-            // Completed conversation: anchor on last user message. Markdown,
+            // Anchor on last user message. Markdown,
             // KaTeX and images settle over several frames — for very long
             // conversations, over several seconds — so a single RAF scroll
             // lands on a pre-final height and the viewport ends up blank
@@ -122,11 +181,10 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
             freshLoadInProgressRef.current = true;
             freshLoadAnchorOffsetRef.current = null;
             freshLoadExpectedScrollTopRef.current = null;
-            requestAnimationFrame(() => {
+            scheduleScrollLastUserTowardTurnStart('instant', () => {
                 const anchor = lastUserMessageRef.current;
                 const container = mainContentRef.current;
                 if (!anchor || !container) return;
-                anchor.scrollIntoView({ behavior: 'instant' });
                 freshLoadAnchorOffsetRef.current = anchor.offsetTop;
                 freshLoadExpectedScrollTopRef.current = container.scrollTop;
             });
@@ -140,39 +198,38 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
             return () => clearTimeout(fallback);
         }
 
-        // Check if new messages were added (user sent a message)
-        const newMessagesAdded = messages.length > prevLength && prevLength > 0;
-        if (newMessagesAdded && isNearBottomRef.current) {
-            // Scroll to show the new user message
+        const hasNewUserTurn = messages.length > prevLength && !!lastUserStableId && lastUserStableId !== prevLastUserStableId && prevLength > 0;
+        if (hasNewUserTurn) {
+            freshLoadInProgressRef.current = false;
+            freshLoadAnchorOffsetRef.current = null;
+            freshLoadExpectedScrollTopRef.current = null;
+            turnScrollInProgressRef.current = true;
+            scheduleScrollLastUserTowardTurnStart('smooth');
+        }
+    }, [conversationId, lastUserStableId, messages.length, scheduleScrollLastUserTowardTurnStart]);
+
+    useEffect(() => {
+        const didFinishStreaming = previousHasStreamingAssistantRef.current && !hasStreamingAssistant;
+        previousHasStreamingAssistantRef.current = hasStreamingAssistant;
+
+        if (didFinishStreaming && turnScrollInProgressRef.current) {
             requestAnimationFrame(() => {
-                lastUserMessageRef.current?.scrollIntoView({ behavior: 'smooth' });
+                scrollLastUserTowardTurnStart('auto');
+                turnScrollInProgressRef.current = false;
             });
         }
-    }, [conversationId, messages.length]);
+    }, [hasStreamingAssistant, scrollLastUserTowardTurnStart]);
 
-    // Scroll when thoughts are added during streaming.
-    // The ResizeObserver handles height-based scrolling well for level 2 (full results),
-    // but at level 1 (outline) new thoughts add minimal height and STEP_END produces
-    // zero height change (results are hidden), so we need an explicit scroll trigger.
     useEffect(() => {
         const prevThoughtsLength = previousThoughtsLengthRef.current;
         previousThoughtsLengthRef.current = currentThoughtsLength;
 
-        if (currentThoughtsLength > prevThoughtsLength && isNearBottomRef.current) {
-            const container = mainContentRef.current;
-            requestAnimationFrame(() => {
-                if (prevThoughtsLength === 0) {
-                    lastUserMessageRef.current?.scrollIntoView({ behavior: 'smooth' });
-                } else if (container) {
-                    container.scrollTop = container.scrollHeight;
-                }
-            });
+        if (currentThoughtsLength > prevThoughtsLength && turnScrollInProgressRef.current) {
+            requestAnimationFrame(() => scrollLastUserTowardTurnStart('auto'));
         }
-    }, [currentThoughtsLength]);
+    }, [currentThoughtsLength, scrollLastUserTowardTurnStart]);
 
-    // Auto-scroll when content height grows during streaming.
-    // Tool call results and expanded thoughts change DOM height without changing
-    // messages.length or currentThoughtsLength, so the above effects miss them.
+    // Keep fresh-load anchoring stable while content height settles.
     useEffect(() => {
         const container = mainContentRef.current;
         const messagesEl = messagesRef.current;
@@ -213,14 +270,9 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
                 }, 1500);
                 return;
             }
-            if (isNearBottomRef.current) {
-                // Defer scroll to after paint so hit-test coordinates stay in sync
-                // with visual positions. Synchronous scrollTop updates during layout
-                // can desync the compositor, making buttons visually offset from their
-                // actual clickable area until the next repaint.
-                requestAnimationFrame(() => {
-                    container.scrollTop = container.scrollHeight;
-                });
+
+            if (turnScrollInProgressRef.current) {
+                requestAnimationFrame(() => scrollLastUserTowardTurnStart('auto'));
             }
         });
         observer.observe(messagesEl);
@@ -228,7 +280,7 @@ export function MessageList({ messages, conversationId, platformFrontendUrl, onD
             observer.disconnect();
             if (stableTimer) clearTimeout(stableTimer);
         };
-    }, []);
+    }, [scrollLastUserTowardTurnStart]);
 
     return (
         <main className="main-content" ref={mainContentRef}>

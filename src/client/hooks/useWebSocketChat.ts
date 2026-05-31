@@ -21,6 +21,7 @@ import type { Message, Thought, ConversationState, ConfirmationRequest, Confirma
 import { acquireWakeLock, releaseWakeLock } from '../utils/tauri';
 import { formatToolCallsForSidebar, generateUUID, generateDeterministicId } from '../utils/formatting';
 import { trimHistoryTailAfterUser, mergeHistoryWithLive } from '../utils/chat-messages';
+import { useReadableTextStream } from './useReadableTextStream';
 
 // ============================================================================
 // Types
@@ -59,6 +60,7 @@ export type ChatAction =
     | { type: 'RUN_STARTED'; conversationId: string; runId: string; clientMessageId: string; suggestedRunId?: string }
     | { type: 'RUN_STOPPED'; conversationId: string; runId: string; reason: StopReason; error?: string }
     | { type: 'RUN_COMPLETE'; conversationId: string; runId: string; response: string; stepId: number }
+    | { type: 'TEXT_DELTA'; conversationId: string; runId: string; delta: string }
     | { type: 'STEP_START'; conversationId: string; runId: string; thought?: string; message?: string; toolCalls: any[] }
     | { type: 'STEP_END'; conversationId: string; runId: string; toolResults: any[]; stepId: number }
     | { type: 'CONFIRMATION_REQUEST'; conversationId: string; runId: string; request: ConfirmationRequest }
@@ -781,6 +783,39 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             };
         }
 
+        case 'TEXT_DELTA': {
+            const { conversationId, runId, delta } = action;
+            const isCurrentConversation = conversationId === state.conversationId;
+
+            const updateMessagesWithDelta = (msgs: Message[]): Message[] => {
+                const idx = findRunAssistantIndex(msgs, runId);
+                if (idx === -1) return msgs;
+
+                const assistant = msgs[idx];
+                if (!assistant) return msgs;
+
+                return msgs.map((msg, i) => {
+                    if (i !== idx) return msg;
+                    return { ...msg, content: (msg.content || '') + delta };
+                });
+            };
+
+            const conversationStates = new Map(state.conversationStates);
+            const existing = conversationStates.get(conversationId);
+            if (existing) {
+                conversationStates.set(conversationId, {
+                    ...existing,
+                    messages: updateMessagesWithDelta(existing.messages),
+                });
+            }
+
+            return {
+                ...state,
+                messages: isCurrentConversation ? updateMessagesWithDelta(state.messages) : state.messages,
+                conversationStates,
+            };
+        }
+
         case 'STEP_START': {
             const { conversationId, runId, thought, message: reasoning, toolCalls } = action;
             const isCurrentConversation = conversationId === state.conversationId;
@@ -819,11 +854,16 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 const existingThoughtIds = new Set((assistant.thoughts || []).map(t => t.id));
                 const dedupedNewThoughts = newThoughts.filter(t => !existingThoughtIds.has(t.id));
 
-                if (dedupedNewThoughts.length === 0) return msgs;
+                const shouldClearStreamedContent = !!reasoning && (toolCalls?.length ?? 0) > 0 && !!assistant.content;
+                if (dedupedNewThoughts.length === 0 && !shouldClearStreamedContent) return msgs;
 
                 return msgs.map((msg, i) => {
                     if (i !== idx) return msg;
-                    return { ...msg, thoughts: [...(msg.thoughts || []), ...dedupedNewThoughts] };
+                    return {
+                        ...msg,
+                        content: shouldClearStreamedContent ? '' : msg.content,
+                        thoughts: [...(msg.thoughts || []), ...dedupedNewThoughts],
+                    };
                 });
             };
 
@@ -1356,6 +1396,11 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     const observedConversationsRef = useRef<Set<string>>(new Set());
     const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    const dispatchTextDelta = useCallback((args: { conversationId: string; runId: string; delta: string }) => {
+        dispatch({ type: 'TEXT_DELTA', ...args });
+    }, []);
+    const { enqueueDelta, flushRun, clearRun } = useReadableTextStream(dispatchTextDelta);
+
     const callbacksRef = useRef<Pick<
         UseWebSocketChatOptions,
         | 'onConversationCreated'
@@ -1448,6 +1493,10 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'run_stopped':
+                // Preserve useful partial output for visible stops/disconnects, but avoid
+                // flashing delayed provider output immediately before an error card.
+                if (message.reason === 'error') clearRun(convId, runId);
+                else flushRun(convId, runId);
                 dispatch({
                     type: 'RUN_STOPPED',
                     conversationId: convId,
@@ -1462,6 +1511,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'run_complete':
+                flushRun(convId, runId);
                 dispatch({
                     type: 'RUN_COMPLETE',
                     conversationId: convId,
@@ -1473,7 +1523,14 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 onTaskCompleteCb?.(undefined, message.data.response, convId);
                 break;
 
+            case 'text_delta':
+                enqueueDelta(convId, runId, message.data.delta);
+                break;
+
             case 'step_start':
+                if (message.data.message && (message.data.toolCalls || []).length > 0) {
+                    clearRun(convId, runId);
+                }
                 dispatch({
                     type: 'STEP_START',
                     conversationId: convId,
@@ -1537,11 +1594,13 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 break;
 
             case 'billing_error':
+                if (convId && runId) clearRun(convId, runId);
                 dispatch({ type: 'BILLING_ERROR', conversationId: convId, runId, error: message.error });
                 onBillingErrorCb?.(message.error, convId);
                 break;
 
             case 'auth_error':
+                if (convId && runId) clearRun(convId, runId);
                 dispatch({ type: 'AUTH_ERROR', conversationId: convId, runId, error: message.error });
                 onAuthErrorCb?.(message.error, convId);
                 break;
@@ -1573,7 +1632,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                 }
                 break;
         }
-    }, []);
+    }, [clearRun, enqueueDelta, flushRun]);
 
     // Connect to WebSocket
     const connect = useCallback(() => {
@@ -1675,11 +1734,14 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     const stop = useCallback((conversationId: string, runId?: string, options?: StopOptions) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
+        const effectiveRunId = runId || state.currentRunId || '';
+
         if (options?.optimistic) {
+            if (effectiveRunId) flushRun(conversationId, effectiveRunId);
             dispatch({
                 type: 'RUN_STOPPED',
                 conversationId,
-                runId: runId || state.currentRunId || '',
+                runId: effectiveRunId,
                 reason: options.reason ?? 'user_stop',
             });
             dispatch({ type: 'CLEAR_CONFIRMATIONS', conversationId });
@@ -1690,7 +1752,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
             conversationId,
             runId,
         }));
-    }, [state.currentRunId]);
+    }, [flushRun, state.currentRunId]);
 
     const respondToConfirmation = useCallback((
         conversationId: string,

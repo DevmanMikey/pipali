@@ -138,6 +138,13 @@ export type RunCompleteMessage = {
     data: { response: string; stepId: number };
 };
 
+export type TextDeltaMessage = {
+    type: 'text_delta';
+    conversationId: string;
+    runId: string;
+    data: { delta: string };
+};
+
 export type StepStartMessage = {
     type: 'step_start';
     conversationId: string;
@@ -216,6 +223,7 @@ export type ServerMessage =
     | RunStartedMessage
     | RunStoppedMessage
     | RunCompleteMessage
+    | TextDeltaMessage
     | StepStartMessage
     | StepEndMessage
     | ConfirmationRequestMessage

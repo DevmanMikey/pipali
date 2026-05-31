@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
-import { __test__ } from '../../src/client/hooks/useWebSocketChat';
-import type { ConversationState, Message, ChatState } from '../../src/client/types';
+import { __test__, type ChatState } from '../../src/client/hooks/useWebSocketChat';
+import type { ConversationState, Message } from '../../src/client/types';
 import { generateDeterministicId } from '../../src/client/utils/formatting';
 
 function makeState(params: {
@@ -84,7 +84,7 @@ test('RUN_COMPLETE appends assistant with stepId stableId when missing', () => {
 });
 
 test('SET_CONVERSATION_ID switches visible messages to target conversation', () => {
-    const state = {
+    const state: ChatState = {
         ...__test__.initialState,
         conversationId: 'a',
         messages: [{ id: 'm1', stableId: 'm1', role: 'assistant', content: 'from a' }],
@@ -102,7 +102,7 @@ test('SET_CONVERSATION_ID switches visible messages to target conversation', () 
 });
 
 test('SET_CONVERSATION_ID clears visible messages when target has no cached state', () => {
-    const state = {
+    const state: ChatState = {
         ...__test__.initialState,
         conversationId: 'a',
         messages: [{ id: 'm1', stableId: 'm1', role: 'assistant', content: 'from a' }],
@@ -197,6 +197,101 @@ test('STEP_START and COMPACTION use deterministic IDs to dedupe events replayed 
     expect(finalAssistant?.thoughts).toHaveLength(2);
     expect(finalAssistant?.thoughts?.[0]?.content).toBe(reasoningText);
     expect(finalAssistant?.thoughts?.[1]?.content).toBe(compactionText);
+});
+
+test('STEP_START with tool calls reclassifies streamed text as thought text', () => {
+    const conversationId = 'c1';
+    const runId = 'run-1';
+    const assistant: Message = {
+        id: runId,
+        stableId: runId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        thoughts: [],
+    };
+
+    const state = makeState({
+        conversationId,
+        messages: [assistant],
+        conversationState: {
+            isProcessing: true,
+            isStopped: false,
+            isCompleted: false,
+            messages: [assistant],
+        },
+    });
+
+    const afterDelta1 = __test__.chatReducer(state, {
+        type: 'TEXT_DELTA',
+        conversationId,
+        runId,
+        delta: 'I need ',
+    });
+    const afterDelta2 = __test__.chatReducer(afterDelta1, {
+        type: 'TEXT_DELTA',
+        conversationId,
+        runId,
+        delta: 'to search.',
+    });
+
+    expect(afterDelta2.messages[0]?.content).toBe('I need to search.');
+    expect(afterDelta2.messages[0]?.thoughts).toEqual([]);
+
+    const afterStepStart = __test__.chatReducer(afterDelta2, {
+        type: 'STEP_START',
+        conversationId,
+        runId,
+        message: 'I need to search.',
+        toolCalls: [{ function_name: 'grep_files', arguments: {}, tool_call_id: 'tool-1' }],
+    });
+
+    expect(afterStepStart.messages[0]?.content).toBe('');
+    expect(afterStepStart.messages[0]?.thoughts?.map(t => t.type)).toEqual(['thought', 'tool_call']);
+    expect(afterStepStart.messages[0]?.thoughts?.[0]?.id).toBe(generateDeterministicId('thought', 'I need to search.'));
+});
+
+test('TEXT_DELTA streams final content until RUN_COMPLETE finalizes it', () => {
+    const conversationId = 'c1';
+    const runId = 'run-1';
+    const assistant: Message = {
+        id: runId,
+        stableId: runId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        thoughts: [],
+    };
+
+    const state = makeState({
+        conversationId,
+        messages: [assistant],
+        conversationState: {
+            isProcessing: true,
+            isStopped: false,
+            isCompleted: false,
+            messages: [assistant],
+        },
+    });
+
+    const afterDelta = __test__.chatReducer(state, {
+        type: 'TEXT_DELTA',
+        conversationId,
+        runId,
+        delta: 'Draft final answer',
+    });
+    expect(afterDelta.messages[0]?.content).toBe('Draft final answer');
+
+    const afterComplete = __test__.chatReducer(afterDelta, {
+        type: 'RUN_COMPLETE',
+        conversationId,
+        runId,
+        response: 'Final answer',
+        stepId: 42,
+    });
+
+    expect(afterComplete.messages[0]?.content).toBe('Final answer');
+    expect(afterComplete.messages[0]?.thoughts).toEqual([]);
 });
 
 test('OPTIMISTIC_RUN_STARTED during an in-flight run marks the user message queued and skips the assistant placeholder', () => {

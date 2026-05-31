@@ -55,6 +55,8 @@ export interface ResearchRunnerOptions {
     onReasoning?: (thought: string) => void;
     /** Callback when user message is persisted to DB (provides step_id for deletion) */
     onUserMessagePersisted?: (stepId: number) => void;
+    /** Callback for real-time text delta streaming */
+    onTextDelta?: (delta: string) => void;
 }
 
 export interface ResearchRunnerResult {
@@ -110,6 +112,7 @@ export async function* runResearchWithConversation(
         onIteration,
         onReasoning,
         onUserMessagePersisted,
+        onTextDelta,
     } = options;
 
     // Load conversation from DB
@@ -174,6 +177,7 @@ export async function* runResearchWithConversation(
         chatModelId: options.chatModelId,
         conversationId,
         runId,
+        onTextChunk: onTextDelta,
     })) {
         // On first iteration (new conversation), persist system prompt and user message to DB
         // System prompt is persisted first to maintain correct ordering: system → user → agent
