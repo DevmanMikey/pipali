@@ -45,10 +45,18 @@ type Subscriber = (event: ConversationEvent) => void;
 // Each tool step typically produces 2 events (step_start + step_end), plus lifecycle events.
 const MAX_REPLAY_EVENTS = 250;
 
+// Streamed text arrives one frame per token; most of each frame is envelope overhead.
+// Coalescing caps delta frames at one per interval (~20/s).
+// So a fast ~200 tok/s stream has ~10x fewer frames, overhead. Slower ones floor at ~20/s, 1x.
+// The client re-paces rendering, so window stays below perceptible latency.
+const DELTA_COALESCE_MS = 50;
+
 export class ConversationEventBus {
     readonly conversationId: string;
     private subscribers = new Set<Subscriber>();
     private recentEvents: ConversationEvent[] = [];
+    private pendingDelta: { runId: string; text: string } | null = null;
+    private deltaFlushTimer: ReturnType<typeof setTimeout> | null = null;
     activeRun: RunHandle | null = null;
 
     /** Context carried across queued runs within the same bus */
@@ -79,6 +87,19 @@ export class ConversationEventBus {
     }
 
     publish(event: ConversationEvent): void {
+        // Buffer streamed text and emit it coalesced (see flushPendingDelta).
+        if (event.type === 'text_delta') {
+            this.bufferDelta(event.runId, event.data.delta);
+            // Short-circuit. Don't add text deltas to recentEvents to:
+            // 1. Not evict actual replay events from bounded buffer
+            // 2. Avoid duplicate streamed content after localStorage hydration on replay
+            return;
+        }
+
+        // Any other event flushes pending deltas first, so streamed text never
+        // arrives after the step or lifecycle event that supersedes it.
+        this.flushPendingDelta();
+
         // Reset replay buffer on run_started
         if (event.type === 'run_started') {
             this.recentEvents = [];
@@ -89,6 +110,10 @@ export class ConversationEventBus {
             this.recentEvents.shift();
         }
 
+        this.deliver(event);
+    }
+
+    private deliver(event: ConversationEvent): void {
         for (const fn of this.subscribers) {
             try {
                 fn(event);
@@ -96,6 +121,43 @@ export class ConversationEventBus {
                 log.error({ err, conversationId: this.conversationId }, 'Subscriber error');
             }
         }
+    }
+
+    private bufferDelta(runId: string, delta: string): void {
+        // A run change shouldn't interleave with live deltas, but flush
+        // defensively so buffered text is never misattributed to a new run.
+        if (this.pendingDelta && this.pendingDelta.runId !== runId) {
+            this.flushPendingDelta();
+        }
+
+        if (this.pendingDelta) {
+            this.pendingDelta.text += delta;
+        } else {
+            this.pendingDelta = { runId, text: delta };
+        }
+
+        // Fixed-interval flush, not a sliding debounce: continuous streaming
+        // still flushes every DELTA_COALESCE_MS, bounding added latency.
+        if (!this.deltaFlushTimer) {
+            this.deltaFlushTimer = setTimeout(() => this.flushPendingDelta(), DELTA_COALESCE_MS);
+        }
+    }
+
+    private flushPendingDelta(): void {
+        if (this.deltaFlushTimer) {
+            clearTimeout(this.deltaFlushTimer);
+            this.deltaFlushTimer = null;
+        }
+        const pending = this.pendingDelta;
+        if (!pending) return;
+        this.pendingDelta = null;
+
+        this.deliver({
+            type: 'text_delta',
+            conversationId: this.conversationId,
+            runId: pending.runId,
+            data: { delta: pending.text },
+        });
     }
 
     hasSubscribers(): boolean {
@@ -115,9 +177,7 @@ export class ConversationEventBus {
         const pending = this.activeRun.pendingConfirmations;
 
         return this.recentEvents.filter(e => {
-            // Text deltas are append-only on the client. Replaying them after
-            // localStorage hydration can duplicate partially streamed content.
-            if (e.type === 'text_delta') return false;
+            if (e.type === 'text_delta') return false;  // defensive, deltas excluded from replay buffer in publish()
             if (e.type !== 'confirmation_request') return true;
             const requestId = (e as any)?.data?.requestId;
             return typeof requestId === 'string' && pending.has(requestId);
@@ -132,6 +192,8 @@ export class ConversationEventBus {
 
     /** Called when a run finishes to potentially clean up the bus */
     onRunFinished(): void {
+        // Terminal events already flush, but guard against a dangling timer.
+        this.flushPendingDelta();
         this.activeRun = null;
         this.maybeCleanup();
     }

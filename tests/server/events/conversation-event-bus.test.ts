@@ -81,18 +81,53 @@ describe('ConversationEventBus', () => {
         expect(replay[1]?.type).toBe('step_start');
     });
 
-    test('text deltas are delivered live but not replayed', () => {
+    test('text deltas are coalesced, ordered, and excluded from the replay buffer', () => {
         const bus = new ConversationEventBus('conv-1');
         bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');
         const received: ConversationEvent[] = [];
         bus.subscribe(event => received.push(event));
 
         bus.publish({ type: 'run_started', conversationId: 'conv-1', runId: 'r1', clientMessageId: 'm1' });
-        bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'Hello' } });
         bus.publish({ type: 'step_start', conversationId: 'conv-1', runId: 'r1', data: { toolCalls: [] } });
 
-        expect(received.map(e => e.type)).toEqual(['run_started', 'text_delta', 'step_start']);
-        expect(bus.getReplayEvents().map(e => e.type)).toEqual(['run_started', 'step_start']);
+        // Stream far more deltas than the bounded replay buffer can hold. They are
+        // buffered, not delivered per-token, so nothing is sent synchronously yet.
+        for (let i = 0; i < 500; i++) {
+            bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: `chunk-${i}` } });
+        }
+        expect(received.some(e => e.type === 'text_delta')).toBe(false);
+
+        // A following lifecycle event flushes the buffered deltas first.
+        bus.publish({ type: 'run_complete', conversationId: 'conv-1', runId: 'r1', data: { response: 'final', stepId: 1 } });
+
+        // 500 token deltas collapse into a single frame, ordered before run_complete.
+        expect(received.map(e => e.type)).toEqual(['run_started', 'step_start', 'text_delta', 'run_complete']);
+        const delta = received.find(e => e.type === 'text_delta');
+        expect((delta as { data: { delta: string } }).data.delta).toBe(
+            Array.from({ length: 500 }, (_, i) => `chunk-${i}`).join('')
+        );
+
+        // Replay preserves the trajectory and contains no deltas (none were evicted).
+        expect(bus.getReplayEvents().map(e => e.type)).toEqual(['run_started', 'step_start', 'run_complete']);
+    });
+
+    test('buffered deltas flush on a fixed interval without a following event', async () => {
+        const bus = new ConversationEventBus('conv-1');
+        bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');
+        const received: ConversationEvent[] = [];
+        bus.subscribe(event => received.push(event));
+
+        bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'Hel' } });
+        bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'lo' } });
+        expect(received).toHaveLength(0);
+
+        // The interval timer flushes coalesced text, so a long final answer keeps
+        // streaming live even when no other event follows until run_complete.
+        await new Promise(resolve => setTimeout(resolve, 120));
+
+        expect(received).toHaveLength(1);
+        expect(received[0]?.type).toBe('text_delta');
+        expect((received[0] as { data: { delta: string } }).data.delta).toBe('Hello');
     });
 
     test('replay buffer resets on run_started', () => {
