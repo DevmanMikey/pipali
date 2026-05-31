@@ -28,6 +28,9 @@ export interface MockScenario {
     iterations: MockIteration[];
     finalResponse: string;
     iterationDelayMs?: number; // Delay between iterations for testing async behavior
+    // Async delay before the final response resolves. Unlike iterationDelayMs's
+    // sync sleep, it yields the event loop so a mid-response soft interrupt lands.
+    finalResponseDelayMs?: number;
 }
 
 /**
@@ -168,6 +171,20 @@ export function simpleResponseNoTools(): MockScenario {
         iterations: [],
         finalResponse: "I'm doing great, thanks for asking!",
         iterationDelayMs: 0,
+    };
+}
+
+/**
+ * Slow no-tool final response: leaves a window to soft-interrupt mid-answer,
+ * to verify the answer is persisted rather than discarded.
+ */
+export function interruptDuringFinalResponseScenario(): MockScenario {
+    return {
+        name: 'interrupt-during-final-response',
+        queryPattern: '^answer then interrupt$',
+        iterations: [],
+        finalResponse: 'Final answer that must survive the interrupt.',
+        finalResponseDelayMs: 2000,
     };
 }
 
@@ -546,6 +563,7 @@ export const defaultMockScenarios: MockScenario[] = [
     slowPausableScenario(),
     quickScenario(),
     simpleResponseNoTools(),
+    interruptDuringFinalResponseScenario(),
     scrollBehaviorSetupScenario(),
     scrollBehaviorFollowupScenario(),
     shellCommandScenario(),

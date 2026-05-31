@@ -38,7 +38,7 @@ function getStateKey(query: string, scenarioName: string, ctx?: MockCtx): string
 /**
  * Generate mock response based on query and scenario
  */
-function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought {
+function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought | Promise<ResponseWithThought> {
     const scenario = findMatchingScenario(query, scenarios);
 
     if (!scenario) {
@@ -71,11 +71,16 @@ function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought {
     if (state.currentIteration >= iterations.length) {
         console.log(`[MockLLM] Scenario ${scenario.name} complete, returning final response`);
         scenarioState.delete(key);
-        return {
+        const finalResponse: ResponseWithThought = {
             message: scenario.finalResponse,
             raw: [],
             thought: undefined,
         };
+        // Async (not sync) sleep, so a mid-flight soft interrupt lands before the run ends.
+        if (scenario.finalResponseDelayMs && scenario.finalResponseDelayMs > 0) {
+            return Bun.sleep(scenario.finalResponseDelayMs).then(() => finalResponse);
+        }
+        return finalResponse;
     }
 
     const iteration = iterations[state.currentIteration];

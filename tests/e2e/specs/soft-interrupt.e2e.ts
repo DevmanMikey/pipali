@@ -88,6 +88,35 @@ test.describe('Soft Interrupt', () => {
         await expect(page.locator('.thought-item:has-text("[interrupted]")')).toHaveCount(0);
     });
 
+    test('interrupting a streaming final response preserves it across reload', async ({ page }) => {
+        // Slow no-tool answer: still in flight when we interrupt below.
+        await chatPage.sendMessage('answer then interrupt');
+        await chatPage.waitForProcessing();
+        const convId = await chatPage.waitForConversationId();
+        expect(convId).toBeTruthy();
+
+        // Interrupt while the final answer is still in flight.
+        await chatPage.sendMessage('you good');
+
+        // Both runs finish: interrupted answer, then follow-up.
+        await chatPage.waitForAssistantResponse();
+        await chatPage.waitForIdle();
+
+        const userMessages = await chatPage.getUserMessages();
+        expect(userMessages).toHaveLength(2);
+        expect(userMessages[0]).toContain('answer then interrupt');
+        expect(userMessages[1]).toContain('you good');
+
+        // The interrupted answer must be completed, not discarded.
+        const finalAnswer = chatPage.assistantMessages.filter({ hasText: 'Final answer that must survive the interrupt.' });
+        await expect(finalAnswer).toHaveCount(1);
+
+        // Reload: the answer must persist (saved to the DB, not lost on interrupt).
+        await chatPage.gotoConversation(convId);
+        await chatPage.waitForConversationHistory();
+        await expect(finalAnswer).toHaveCount(1);
+    });
+
     test('soft interrupt during step execution waits for step to complete', async ({ page }) => {
         // Start a slow task with visible tool calls
         await chatPage.sendMessage('run a pausable analysis');

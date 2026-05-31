@@ -263,8 +263,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                     });
                 }
 
-                // Check for soft interrupt
-                if (runHandle.stopMode === 'soft' && runHandle.queuedMessages.length > 0) {
+                // Check for mid run soft-interrupt
+                if (iteration.toolCalls.length > 0 && runHandle.stopMode === 'soft' && runHandle.queuedMessages.length > 0) {
                     bus.publish({
                         type: 'run_stopped',
                         conversationId,

@@ -12,7 +12,7 @@ const log = createChildLogger({ component: 'llm' });
 // Test mock interface - set by E2E test preload scripts via globalThis
 declare global {
     var __pipaliMockLLM:
-        | ((query: string, ctx?: { sessionId?: string }) => ResponseWithThought)
+        | ((query: string, ctx?: { sessionId?: string }) => ResponseWithThought | Promise<ResponseWithThought>)
         | undefined;
 }
 
