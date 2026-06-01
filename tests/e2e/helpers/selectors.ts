@@ -71,7 +71,7 @@ export const Selectors = {
     logo: '.logo.clickable',
 
     // Streaming
-    streamingIndicator: '.streaming-indicator',
+    streamingIndicator: '.message-content.streaming',
 
     // Confirmation Dialog
     confirmationDialog: '.confirmation-dialog',

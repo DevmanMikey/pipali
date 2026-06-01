@@ -26,14 +26,16 @@ interface MessageItemProps {
     onAuthSignIn?: (messageId: string) => void;
     onAuthDismiss?: (messageId: string) => void;
     onRunErrorDismiss?: (messageId: string) => void;
+    isActiveRun?: boolean;
 }
 
-export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, onRunErrorDismiss }: MessageItemProps) {
+export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, onRunErrorDismiss, isActiveRun = false }: MessageItemProps) {
     const { t } = useTranslation();
     const isUser = message.role === 'user';
+    const isStreaming = message.isStreaming || isActiveRun;
     const [isHovered, setIsHovered] = useState(false);
 
-    const canDelete = onDelete && !message.isStreaming;
+    const canDelete = onDelete && !isStreaming;
 
     // Render billing message if present
     if (message.billingInfo && platformFrontendUrl) {
@@ -93,7 +95,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingC
 
             {/* Thoughts / Reasoning */}
             {message.thoughts && message.thoughts.length > 0 && (
-                <ThoughtsSection thoughts={message.thoughts} isStreaming={message.isStreaming} />
+                <ThoughtsSection thoughts={message.thoughts} isStreaming={isStreaming} />
             )}
 
             {/* Message Content */}
@@ -116,7 +118,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onBillingC
                         {message.content}
                     </ReactMarkdown>
                 </div>
-            ) : message.isStreaming ? (
+            ) : isStreaming ? (
                 <StreamingIndicator />
             ) : null}
 

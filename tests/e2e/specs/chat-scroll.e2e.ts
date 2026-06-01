@@ -3,6 +3,51 @@ import { ChatPage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
 
 test.describe('Chat scrolling', () => {
+    test('follows the latest trajectory step while an expanded run streams', async ({ page }) => {
+        await page.addInitScript(() => localStorage.setItem('thoughts-expand-level', '0'));
+        await page.setViewportSize({ width: 900, height: 360 });
+
+        const chatPage = new ChatPage(page);
+        try {
+            await chatPage.goto();
+            await chatPage.sendMessage('live outline scroll');
+            await chatPage.waitForProcessing();
+            await chatPage.waitForThoughts();
+            await chatPage.expandThoughts();
+
+            await page.waitForFunction(
+                (selector) => document.querySelectorAll(selector).length >= 14,
+                Selectors.thoughtItem,
+                { timeout: 20000 }
+            );
+            await expect(chatPage.stopButton).toBeVisible();
+
+            // The newest trajectory step stays in view at the bottom of the viewport;
+            // the run is not pinned to the assistant message start while streaming.
+            await page.waitForFunction(
+                (selectors) => {
+                    const container = document.querySelector(selectors.mainContent);
+                    const items = Array.from(document.querySelectorAll(selectors.thoughtItem));
+                    const lastItem = items.at(-1);
+                    if (!(container instanceof HTMLElement) || !(lastItem instanceof HTMLElement)) return false;
+
+                    const containerRect = container.getBoundingClientRect();
+                    const lastRect = lastItem.getBoundingClientRect();
+                    return container.scrollHeight > container.clientHeight
+                        && lastRect.top >= containerRect.top
+                        && lastRect.bottom <= containerRect.bottom + 8;
+                },
+                Selectors,
+                { timeout: 5000 }
+            );
+        } finally {
+            if (await chatPage.isProcessing().catch(() => false)) {
+                await chatPage.stopTask();
+                await chatPage.waitForIdle();
+            }
+        }
+    });
+
     test('frames follow-up turns as responses grow and keeps latest output reachable', async ({ page, context }) => {
         const chatPage = new ChatPage(page);
         await context.clearCookies();

@@ -212,6 +212,33 @@ export function scrollBehaviorFollowupScenario(): MockScenario {
     };
 }
 
+export function liveOutlineScrollScenario(): MockScenario {
+    const iterations: MockIteration[] = Array.from({ length: 10 }, (_, i) => ({
+        thought: `Live outline step ${i + 1} of 10...`,
+        toolCalls: [
+            {
+                function_name: 'list_files',
+                arguments: { path: '.', pattern: `outline-step-${i + 1}` },
+                tool_call_id: `tc-outline-${i + 1}`,
+            },
+        ],
+        toolResults: [
+            {
+                source_call_id: `tc-outline-${i + 1}`,
+                content: `Completed outline step ${i + 1}`,
+            },
+        ],
+    }));
+
+    return {
+        name: 'live-outline-scroll',
+        queryPattern: '^live outline scroll$',
+        iterations,
+        finalResponse: 'Live outline scroll complete.',
+        finalResponseDelayMs: 5000,
+    };
+}
+
 /**
  * Create a shell command scenario that triggers shell_command with confirmation
  */
@@ -566,6 +593,7 @@ export const defaultMockScenarios: MockScenario[] = [
     interruptDuringFinalResponseScenario(),
     scrollBehaviorSetupScenario(),
     scrollBehaviorFollowupScenario(),
+    liveOutlineScrollScenario(),
     shellCommandScenario(),
     readWriteShellCommandScenario(),
     writeFileScenario(),
