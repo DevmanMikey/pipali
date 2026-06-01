@@ -52,6 +52,10 @@ const UV_DOWNLOAD_MAP: Record<Platform, string> = {
     "windows-x64": `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-pc-windows-msvc.zip`,
 };
 
+// Pin AppImage tool to latest stable release for reproducible builds and controlled upgrades
+// Check https://github.com/AppImage/appimagetool/releases for updates
+const APPIMAGETOOL_VERSION = "1.9.1";
+
 async function parseArgs(): Promise<{ platform: Platform; debug: boolean; disableUpdaterArtifacts: boolean }> {
     const args = process.argv.slice(2);
     let platform: Platform | undefined;
@@ -654,11 +658,11 @@ async function repackAppImageWithPristineSidecars(debug: boolean, platform: Plat
     // Cache appimagetool next to Tauri's other build tooling
     const cacheDir = path.join(process.env.HOME || "/root", ".cache", "tauri");
     await fs.mkdir(cacheDir, { recursive: true });
-    const appimagetool = path.join(cacheDir, `appimagetool-${appimagetoolArch}.AppImage`);
+    const appimagetool = path.join(cacheDir, `appimagetool-${APPIMAGETOOL_VERSION}-${appimagetoolArch}.AppImage`);
     try {
         await fs.access(appimagetool);
     } catch {
-        const url = `https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimagetoolArch}.AppImage`;
+        const url = `https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${appimagetoolArch}.AppImage`;
         console.log(`   Downloading appimagetool from ${url}`);
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`Failed to download appimagetool: HTTP ${resp.status}`);
