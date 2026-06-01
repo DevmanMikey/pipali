@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+### 🎁 New
+- Use Ollama, OpenRouter and other OpenAI Responses compatible API by setting OPENAI_BASE_URL
+- Connect OAuth-secured MCP servers like Slack, Google Workspace and Notion from the Tools page
+
+### 🧪 Improve
+- Stream chat responses for a faster, readable chat UX
+- Error responses shown as dismissible cards with copyable details instead of raw text
+
+### 🛠️ Fix
+- Make Pipali app work on Ubuntu, Debian again
+- Multiple, same turn edits to the same file no longer overwrite each other
+
 ## 0.5.2
 
 ### 🧪 Improve
