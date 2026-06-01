@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
@@ -50,7 +50,7 @@
     "@hono/zod-validator": "^0.7.5",
     "@langchain/community": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-notification": "^2",
     "@tauri-apps/plugin-opener": "^2.5.3",
