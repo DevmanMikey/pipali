@@ -21,6 +21,14 @@ export function McpToolsPage() {
         fetchServers();
     }, []);
 
+    // Refresh when the window regains focus so a server that just finished its
+    // OAuth flow in the browser shows as connected when the user returns.
+    useEffect(() => {
+        const onFocus = () => fetchServers();
+        window.addEventListener('focus', onFocus);
+        return () => window.removeEventListener('focus', onFocus);
+    }, []);
+
     const fetchServers = async () => {
         try {
             const res = await apiFetch('/api/mcp/servers');

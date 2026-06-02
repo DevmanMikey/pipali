@@ -14,7 +14,11 @@ import {
 } from '../processor/mcp';
 import { McpClient, isMcpOAuthUnauthorizedError } from '../processor/mcp/client';
 import { clearMcpOAuthState, DbMcpOAuthProvider, getMcpOAuthState } from '../processor/mcp/oauth-provider';
+import { renderStatusPage } from './status-page';
 import { createChildLogger } from '../logger';
+
+// Deep link that returns the desktop app to the MCP tools page after OAuth
+const TOOLS_DEEP_LINK = 'pipali://tools';
 
 const log = createChildLogger({ component: 'mcp' });
 
@@ -41,31 +45,16 @@ function getOrigin(requestUrl: string): string {
 }
 
 function renderOAuthCallbackPage(title: string, message: string, success: boolean): Response {
-    const escapedTitle = title.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
-    const escapedMessage = message.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
-    return new Response(`<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${escapedTitle}</title>
-  <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #1f2933; }
-    main { width: min(420px, calc(100vw - 32px)); background: white; border: 1px solid #dde3ea; border-radius: 8px; padding: 28px; box-shadow: 0 10px 30px rgba(16, 24, 40, 0.08); }
-    h1 { font-size: 20px; margin: 0 0 10px; }
-    p { margin: 0 0 20px; line-height: 1.5; color: #52606d; }
-    a { color: #2563eb; text-decoration: none; font-weight: 600; }
-    .status { color: ${success ? '#047857' : '#b42318'}; font-weight: 600; margin-bottom: 8px; }
-  </style>
-</head>
-<body>
-  <main>
-    <div class="status">${success ? 'Connected' : 'Connection failed'}</div>
-    <h1>${escapedTitle}</h1>
-    <p>${escapedMessage}</p>
-    <a href="/tools">Return to Pipali Tools</a>
-  </main>
-</body>
-</html>`, {
+    const html = renderStatusPage({
+        title,
+        message,
+        status: success ? 'success' : 'error',
+        // Foreground the desktop app back on the tools page where the user
+        // started connecting the server. Harmless in the browser-only app.
+        deepLink: TOOLS_DEEP_LINK,
+        link: { href: '/tools', label: 'Return to tools' },
+    });
+    return new Response(html, {
         headers: { 'Content-Type': 'text/html; charset=utf-8' },
     });
 }
@@ -376,7 +365,7 @@ mcp.get('/oauth/callback', async (c) => {
             .set({ oauthStatus: 'connected', lastError: null, updatedAt: new Date() })
             .where(eq(McpServer.id, server.id));
         await reconnectMcpServer(server.name, { oauthInteractive: false, callbackOrigin: getOrigin(c.req.url) });
-        return renderOAuthCallbackPage(`${server.name} connected`, 'OAuth authorization completed. You can return to Pipali.', true);
+        return renderOAuthCallbackPage(`${server.name} connected`, 'Authorization complete. Returning you to Pipali — you can close this tab once the app is in focus.', true);
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error({ err, server: server.name }, 'Failed to complete MCP OAuth callback');

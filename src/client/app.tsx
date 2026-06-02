@@ -432,9 +432,16 @@ const App = () => {
         };
     }, [scheduleTextareaFocus]);
 
-    // Helper function to parse deep link URL and navigate to conversation
+    // Helper function to parse deep link URL and route the app
     const handleDeepLink = useCallback((url: string) => {
-        // Parse pipali://chat/{conversationId} format
+        // pipali://tools - return to the MCP tools page (e.g. after completing
+        // an MCP server's OAuth flow in the browser)
+        if (/^pipali:\/\/tools\/?$/.test(url)) {
+            setCurrentPage('mcp-tools');
+            window.history.pushState({}, '', '/tools');
+            return;
+        }
+        // pipali://chat/{conversationId}
         const match = url.match(/^pipali:\/\/chat\/([a-zA-Z0-9-]+)/);
         if (match) {
             const convId = match[1];
