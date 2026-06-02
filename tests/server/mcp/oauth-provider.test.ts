@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { clearMcpOAuthState, DbMcpOAuthProvider, getMcpOAuthState } from '../../../src/server/processor/mcp/oauth-provider';
+import {
+    clearMcpOAuthState,
+    DbMcpOAuthProvider,
+    getMcpOAuthState,
+    saveMcpOAuthResourceMetadataUrl,
+} from '../../../src/server/processor/mcp/oauth-provider';
 
 const oauthStateTable = 'mcp_oauth_state';
 const serverTable = 'mcp_server';
@@ -57,6 +62,9 @@ function makeServer() {
         apiKey: null,
         authType: 'oauth',
         oauthStatus: 'not_connected',
+        oauthClientId: null,
+        oauthClientSecret: null,
+        oauthScopes: null,
         env: null,
         confirmationMode: 'always',
         enabled: true,
@@ -146,6 +154,7 @@ describe('DbMcpOAuthProvider', () => {
         await provider.saveClientInformation({ client_id: 'client-1' });
         await provider.saveTokens({ access_token: 'access-1', token_type: 'Bearer', scope: 'read' });
         await provider.validateResourceURL('https://mcp.example.com/mcp');
+        await saveMcpOAuthResourceMetadataUrl(42, 'https://mcp.example.com/.well-known/oauth-protected-resource/list_items');
 
         await clearMcpOAuthState(42, 'tokens');
         let saved = await getMcpOAuthState(42);
@@ -162,6 +171,7 @@ describe('DbMcpOAuthProvider', () => {
         await clearMcpOAuthState(42, 'client');
         saved = await getMcpOAuthState(42);
         expect(saved?.clientInformation).toBeNull();
+        expect(saved?.resourceMetadataUrl).toBeNull();
         expect(saved?.resourceUrl).toBeNull();
 
         await clearMcpOAuthState(42);

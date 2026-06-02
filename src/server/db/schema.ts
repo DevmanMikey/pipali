@@ -363,6 +363,9 @@ export const McpServer = pgTable('mcp_server', {
     // Authentication mode for HTTP-based MCP servers
     authType: McpAuthTypeEnum('auth_type').default('none').notNull(),
     oauthStatus: McpOAuthStatusEnum('oauth_status').default('not_connected').notNull(),
+    oauthClientId: text('oauth_client_id'),
+    oauthClientSecret: text('oauth_client_secret'),
+    oauthScopes: jsonb('oauth_scopes').$type<string[]>(),
 
     // Optional environment variables to pass to stdio servers (JSON object)
     env: jsonb('env').$type<Record<string, string>>(),
@@ -385,12 +388,12 @@ export const McpServer = pgTable('mcp_server', {
     ...dbBaseModel,
 });
 
-// OAuth session and client registration state for HTTP-based MCP servers.
-// Secrets are kept separate from the server config so API responses can omit them.
+// OAuth session and dynamic client registration state for HTTP-based MCP servers.
 export const McpOAuthState = pgTable('mcp_oauth_state', {
     id: serial('id').primaryKey(),
     serverId: integer('server_id').notNull().references(() => McpServer.id, { onDelete: 'cascade' }),
     authorizationServerUrl: text('authorization_server_url'),
+    resourceMetadataUrl: text('resource_metadata_url'),
     resourceUrl: text('resource_url'),
     scope: text('scope'),
     state: text('state'),

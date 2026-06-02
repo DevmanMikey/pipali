@@ -21,6 +21,9 @@ export interface McpServerInfo {
     authType: McpAuthType;
     oauthStatus: McpOAuthStatus;
     apiKey?: string;
+    oauthClientId?: string | null;
+    oauthClientSecret?: string | null;
+    oauthScopes?: string[] | null;
     env?: Record<string, string>;
     confirmationMode: McpConfirmationMode;
     enabled: boolean;
@@ -69,6 +72,9 @@ export interface CreateMcpServerInput {
     path: string;
     authType?: McpAuthType;
     apiKey?: string;
+    oauthClientId?: string;
+    oauthClientSecret?: string;
+    oauthScopes?: string[];
     env?: Record<string, string>;
     confirmationMode?: McpConfirmationMode;
     enabled?: boolean;
@@ -80,6 +86,9 @@ export interface UpdateMcpServerInput {
     path?: string;
     authType?: McpAuthType;
     apiKey?: string;
+    oauthClientId?: string;
+    oauthClientSecret?: string;
+    oauthScopes?: string[];
     env?: Record<string, string>;
     confirmationMode?: McpConfirmationMode;
     enabled?: boolean;

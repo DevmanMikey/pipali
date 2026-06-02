@@ -13,7 +13,12 @@ import {
     closeMcpClients,
 } from '../processor/mcp';
 import { McpClient, isMcpOAuthUnauthorizedError } from '../processor/mcp/client';
-import { clearMcpOAuthState, DbMcpOAuthProvider, getMcpOAuthState } from '../processor/mcp/oauth-provider';
+import {
+    clearMcpOAuthState,
+    DbMcpOAuthProvider,
+    getMcpOAuthState,
+    saveMcpOAuthResourceMetadataUrl,
+} from '../processor/mcp/oauth-provider';
 import { renderStatusPage } from './status-page';
 import { createChildLogger } from '../logger';
 
@@ -32,6 +37,9 @@ const createMcpServerSchema = z.object({
     path: z.string().min(1),
     authType: z.enum(['none', 'bearer', 'oauth']).optional(),
     apiKey: z.string().optional(),
+    oauthClientId: z.string().optional(),
+    oauthClientSecret: z.string().optional(),
+    oauthScopes: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
     confirmationMode: z.enum(['always', 'unsafe_only', 'never']).optional(),
     enabled: z.boolean().optional(),
@@ -59,6 +67,42 @@ function renderOAuthCallbackPage(title: string, message: string, success: boolea
     });
 }
 
+function cleanOptionalString(value: string | undefined): string | null {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+}
+
+function cleanOAuthScopes(scopes: string[] | undefined): string[] | null {
+    const cleaned = [...new Set((scopes ?? []).map(scope => scope.trim()).filter(Boolean))];
+    return cleaned.length > 0 ? cleaned : null;
+}
+
+function scopesEqual(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
+    const left = a ?? [];
+    const right = b ?? [];
+    return left.length === right.length && left.every((scope, index) => scope === right[index]);
+}
+
+function oauthScopeParam(scopes: string[] | null | undefined): string | undefined {
+    return (scopes ?? []).map(scope => scope.trim()).filter(Boolean).join(' ') || undefined;
+}
+
+function isGoogleApisUrl(path: string): boolean {
+    try {
+        const { hostname } = new URL(path);
+        return hostname === 'googleapis.com' || hostname.endsWith('.googleapis.com');
+    } catch {
+        return false;
+    }
+}
+
+function buildGoogleResourceMetadataUrl(serverUrl: string, toolName: string): URL {
+    const url = new URL(serverUrl);
+    url.pathname = `/.well-known/oauth-protected-resource/${encodeURIComponent(toolName)}`;
+    url.search = '';
+    return url;
+}
+
 async function getFreshServer(id: number) {
     const [server] = await db.select().from(McpServer).where(eq(McpServer.id, id));
     return server;
@@ -77,6 +121,50 @@ async function startMcpOAuth(server: typeof McpServer.$inferSelect, callbackOrig
     }
     const state = await getMcpOAuthState(server.id);
     return state?.lastAuthorizationUrl ?? undefined;
+}
+
+async function startGoogleWorkspaceMcpOAuth(server: typeof McpServer.$inferSelect, callbackOrigin: string): Promise<string | undefined> {
+    const client = new McpClient(server);
+    let tools: Awaited<ReturnType<McpClient['getTools']>> = [];
+    try {
+        await client.connect();
+        tools = await client.getTools();
+    } finally {
+        await client.close();
+    }
+
+    // No MCP tool is called here. Google keys protected-resource metadata by
+    // tool name, so any listed schema name can start the OAuth flow.
+    const metadataToolName = tools[0]?.originalName;
+    if (!metadataToolName) {
+        throw new Error('Google Workspace MCP server did not return any tools to authorize.');
+    }
+
+    const resourceMetadataUrl = buildGoogleResourceMetadataUrl(server.path, metadataToolName);
+    await saveMcpOAuthResourceMetadataUrl(server.id, resourceMetadataUrl.toString());
+
+    const provider = new DbMcpOAuthProvider(server, {
+        interactive: true,
+        callbackOrigin,
+    });
+    await runMcpOAuth(provider, {
+        serverUrl: server.path,
+        resourceMetadataUrl,
+        scope: oauthScopeParam(server.oauthScopes),
+    });
+
+    const state = await getMcpOAuthState(server.id);
+    return state?.lastAuthorizationUrl ?? undefined;
+}
+
+async function startMcpOAuthWithFallback(server: typeof McpServer.$inferSelect, callbackOrigin: string): Promise<string | undefined> {
+    const authorizationUrl = await startMcpOAuth(server, callbackOrigin);
+    if (authorizationUrl || !isGoogleApisUrl(server.path)) {
+        return authorizationUrl;
+    }
+
+    log.info({ server: server.name }, 'MCP reconnect did not start OAuth; using Google Workspace protected-resource metadata fallback');
+    return startGoogleWorkspaceMcpOAuth(server, callbackOrigin);
 }
 
 // GET /api/mcp/servers - List all MCP servers
@@ -112,6 +200,9 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
         const authType = input.transportType === 'http'
             ? input.authType ?? (input.apiKey ? 'bearer' : 'none')
             : 'none';
+        const oauthClientId = input.transportType === 'http' ? cleanOptionalString(input.oauthClientId) : null;
+        const oauthClientSecret = input.transportType === 'http' ? cleanOptionalString(input.oauthClientSecret) : null;
+        const oauthScopes = input.transportType === 'http' ? cleanOAuthScopes(input.oauthScopes) : null;
         const results = await db.insert(McpServer).values({
             name: input.name,
             description: input.description,
@@ -120,6 +211,9 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
             authType,
             oauthStatus: authType === 'oauth' ? 'auth_pending' : 'not_connected',
             apiKey: authType === 'bearer' ? input.apiKey : null,
+            oauthClientId,
+            oauthClientSecret,
+            oauthScopes,
             env: input.env,
             confirmationMode: input.confirmationMode ?? 'always',
             enabled: input.enabled ?? true,
@@ -138,7 +232,7 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
         if (server.enabled) {
             try {
                 if (server.authType === 'oauth') {
-                    authorizationUrl = await startMcpOAuth(server, getOrigin(c.req.url));
+                    authorizationUrl = await startMcpOAuthWithFallback(server, getOrigin(c.req.url));
                 } else {
                     await reconnectMcpServer(server.name);
                 }
@@ -207,6 +301,20 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
         const nextAuthType = nextTransportType === 'http'
             ? input.authType ?? existing.authType ?? (existing.apiKey ? 'bearer' : 'none')
             : 'none';
+        const nextPath = input.path ?? existing.path;
+        const nextOAuthClientId = input.oauthClientId !== undefined
+            ? (nextTransportType === 'http' ? cleanOptionalString(input.oauthClientId) : null)
+            : existing.oauthClientId;
+        const nextOAuthClientSecret = input.oauthClientSecret !== undefined
+            ? (nextTransportType === 'http' ? cleanOptionalString(input.oauthClientSecret) : null)
+            : existing.oauthClientSecret;
+        const nextOAuthScopes = input.oauthScopes !== undefined
+            ? (nextTransportType === 'http' ? cleanOAuthScopes(input.oauthScopes) : null)
+            : existing.oauthScopes;
+        const oauthConfigChanged = nextOAuthClientId !== existing.oauthClientId
+            || nextOAuthClientSecret !== existing.oauthClientSecret
+            || nextPath !== existing.path
+            || !scopesEqual(nextOAuthScopes, existing.oauthScopes);
 
         if (input.transportType !== undefined) updateData.transportType = input.transportType;
         if (input.path !== undefined) updateData.path = input.path;
@@ -219,6 +327,15 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
         }
         if (nextAuthType === 'bearer' && input.apiKey !== undefined) {
             updateData.apiKey = input.apiKey;
+        }
+        if (input.oauthClientId !== undefined || input.transportType !== undefined) {
+            updateData.oauthClientId = nextTransportType === 'http' ? nextOAuthClientId : null;
+        }
+        if (input.oauthClientSecret !== undefined || input.transportType !== undefined) {
+            updateData.oauthClientSecret = nextTransportType === 'http' ? nextOAuthClientSecret : null;
+        }
+        if (input.oauthScopes !== undefined || input.transportType !== undefined) {
+            updateData.oauthScopes = nextTransportType === 'http' ? nextOAuthScopes : null;
         }
         if (input.env !== undefined) updateData.env = input.env;
         if (input.confirmationMode !== undefined) updateData.confirmationMode = input.confirmationMode;
@@ -235,13 +352,13 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
             return c.json({ error: 'Failed to update MCP server' }, 500);
         }
 
-        if (existing.authType === 'oauth' && updated.authType !== 'oauth') {
+        if (existing.authType === 'oauth' && (updated.authType !== 'oauth' || oauthConfigChanged)) {
             await clearMcpOAuthState(updated.id);
             await db
                 .update(McpServer)
-                .set({ oauthStatus: 'not_connected', updatedAt: new Date() })
+                .set({ oauthStatus: updated.authType === 'oauth' ? 'auth_pending' : 'not_connected', updatedAt: new Date() })
                 .where(eq(McpServer.id, updated.id));
-            updated.oauthStatus = 'not_connected';
+            updated.oauthStatus = updated.authType === 'oauth' ? 'auth_pending' : 'not_connected';
         }
 
         log.info(`✅ Updated MCP server "${updated.name}"`);
@@ -302,7 +419,7 @@ mcp.post('/servers/:id/oauth/reconnect', async (c) => {
             })
             .where(eq(McpServer.id, server.id));
 
-        const authorizationUrl = await startMcpOAuth(server, getOrigin(c.req.url));
+        const authorizationUrl = await startMcpOAuthWithFallback(server, getOrigin(c.req.url));
         const freshServer = await getFreshServer(server.id);
         return c.json({ success: true, server: freshServer ?? server, authorizationUrl });
     } catch (error) {
@@ -356,9 +473,14 @@ mcp.get('/oauth/callback', async (c) => {
 
     try {
         const provider = new DbMcpOAuthProvider(server, { callbackOrigin: getOrigin(c.req.url) });
+        const resourceMetadataUrl = storedState.resourceMetadataUrl
+            ? new URL(storedState.resourceMetadataUrl)
+            : undefined;
         await runMcpOAuth(provider, {
             serverUrl: server.path,
             authorizationCode: code,
+            resourceMetadataUrl,
+            scope: oauthScopeParam(server.oauthScopes),
         });
         await db
             .update(McpServer)

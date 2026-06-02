@@ -3,3 +3,4 @@ export { McpToolsEmpty } from './McpToolsEmpty';
 export { McpServerCard } from './McpServerCard';
 export { CreateMcpServerModal } from './CreateMcpServerModal';
 export { McpServerDetailModal } from './McpServerDetailModal';
+export { McpOAuthAdvancedSettings } from './McpOAuthAdvancedSettings';

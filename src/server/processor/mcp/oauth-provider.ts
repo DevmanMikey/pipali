@@ -16,6 +16,11 @@ const log = createChildLogger({ component: 'mcp-oauth' });
 type McpServerRow = typeof McpServer.$inferSelect;
 type McpOAuthStateRow = typeof McpOAuthState.$inferSelect;
 
+function cleanOAuthScopes(scopes: string[] | null | undefined): string | undefined {
+    const cleaned = (scopes ?? []).map(scope => scope.trim()).filter(Boolean);
+    return cleaned.length > 0 ? cleaned.join(' ') : undefined;
+}
+
 async function openBrowser(url: string): Promise<void> {
     if (process.env.PIPALI_TEST_MODE === 'true') {
         return;
@@ -74,6 +79,7 @@ export async function clearMcpOAuthState(serverId: number, scope: 'all' | 'clien
     if (scope === 'client') {
         patch.clientInformation = null;
         patch.authorizationServerUrl = null;
+        patch.resourceMetadataUrl = null;
         patch.resourceUrl = null;
         patch.scope = null;
     } else if (scope === 'tokens') {
@@ -88,6 +94,10 @@ export async function clearMcpOAuthState(serverId: number, scope: 'all' | 'clien
 
 export async function getMcpOAuthState(serverId: number): Promise<McpOAuthStateRow | undefined> {
     return getState(serverId);
+}
+
+export async function saveMcpOAuthResourceMetadataUrl(serverId: number, resourceMetadataUrl: string): Promise<void> {
+    await patchState(serverId, { resourceMetadataUrl });
 }
 
 export class DbMcpOAuthProvider implements OAuthClientProvider {
@@ -108,12 +118,14 @@ export class DbMcpOAuthProvider implements OAuthClientProvider {
     }
 
     get clientMetadata(): OAuthClientMetadata {
+        const scope = cleanOAuthScopes(this.server.oauthScopes);
         return {
             client_name: 'Pipali',
             redirect_uris: [this.redirectUrl],
             grant_types: ['authorization_code', 'refresh_token'],
             response_types: ['code'],
-            token_endpoint_auth_method: 'none',
+            token_endpoint_auth_method: this.server.oauthClientSecret ? 'client_secret_post' : 'none',
+            ...(scope ? { scope } : {}),
         };
     }
 
@@ -124,6 +136,16 @@ export class DbMcpOAuthProvider implements OAuthClientProvider {
     }
 
     async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
+        const clientId = this.server.oauthClientId?.trim();
+        if (clientId) {
+            const clientSecret = this.server.oauthClientSecret?.trim();
+            return {
+                client_id: clientId,
+                ...(clientSecret ? { client_secret: clientSecret } : {}),
+                token_endpoint_auth_method: clientSecret ? 'client_secret_post' : 'none',
+            };
+        }
+
         const state = await getState(this.server.id);
         return state?.clientInformation as OAuthClientInformationMixed | undefined;
     }

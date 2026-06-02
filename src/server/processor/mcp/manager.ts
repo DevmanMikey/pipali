@@ -11,6 +11,7 @@ import {
 } from '../confirmation';
 import { McpClient, isMcpOAuthUnauthorizedError } from './client';
 import type { McpServerConfig, McpContentType, McpToolCallResult, McpToolInfo } from './types';
+import { getMcpOAuthState } from './oauth-provider';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'mcp' });
@@ -20,6 +21,7 @@ const log = createChildLogger({ component: 'mcp' });
  */
 const activeClients: Map<string, McpClient> = new Map();
 type McpConnectOptions = { oauthInteractive?: boolean; callbackOrigin?: string };
+type McpConnectResult = 'connected' | 'auth_pending';
 const MCP_OAUTH_REAUTHORIZE_MESSAGE = 'OAuth authorization is required. Reconnect this MCP server from the Tools page.';
 
 async function markMcpServerAuthRequired(serverName: string, lastError: string = MCP_OAUTH_REAUTHORIZE_MESSAGE): Promise<void> {
@@ -77,10 +79,13 @@ export async function loadEnabledMcpServers(): Promise<void> {
     // Connect to each server
     const connectPromises = servers.map(async (server) => {
         try {
-            await connectMcpServer(server, { oauthInteractive: false });
-            log.info(`Connected to server: ${server.name}`);
+            const result = await connectMcpServer(server, { oauthInteractive: false });
+            if (result === 'auth_pending') {
+                log.info(`OAuth authorization pending for server: ${server.name}`);
+                return;
+            }
 
-            // Update lastConnectedAt timestamp
+            log.info(`Connected to server: ${server.name}`);
             await db
                 .update(McpServer)
                 .set({ lastConnectedAt: new Date(), lastError: null })
@@ -111,24 +116,43 @@ export async function loadEnabledMcpServers(): Promise<void> {
 /**
  * Connect to a specific MCP server
  */
-async function connectMcpServer(config: McpServerConfig, options: McpConnectOptions = {}): Promise<void> {
+async function connectMcpServer(config: McpServerConfig, options: McpConnectOptions = {}): Promise<McpConnectResult> {
     // Close existing connection if any
     const existingClient = activeClients.get(config.name);
     if (existingClient) {
         await existingClient.close();
+        activeClients.delete(config.name);
     }
 
     // Create and connect new client
     const client = new McpClient(config, options);
     try {
         await client.connect();
-        activeClients.set(config.name, client);
         if (config.authType === 'oauth') {
+            const oauthState = await getMcpOAuthState(config.id);
+            if (!oauthState?.tokens) {
+                await client.close();
+                await db
+                    .update(McpServer)
+                    .set({
+                        oauthStatus: 'auth_pending',
+                        lastError: 'OAuth authorization is required. Complete the browser sign-in flow to connect this MCP server.',
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(McpServer.id, config.id));
+                return 'auth_pending';
+            }
+
+            activeClients.set(config.name, client);
             await db
                 .update(McpServer)
                 .set({ oauthStatus: 'connected', lastError: null, updatedAt: new Date() })
                 .where(eq(McpServer.id, config.id));
+            return 'connected';
         }
+
+        activeClients.set(config.name, client);
+        return 'connected';
     } catch (error) {
         if (config.authType === 'oauth' && isMcpOAuthUnauthorizedError(error)) {
             await db

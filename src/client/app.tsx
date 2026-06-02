@@ -439,6 +439,7 @@ const App = () => {
         if (/^pipali:\/\/tools\/?$/.test(url)) {
             setCurrentPage('mcp-tools');
             window.history.pushState({}, '', '/tools');
+            window.dispatchEvent(new CustomEvent('pipali:tools-return'));
             return;
         }
         // pipali://chat/{conversationId}

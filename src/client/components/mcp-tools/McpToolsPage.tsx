@@ -21,12 +21,17 @@ export function McpToolsPage() {
         fetchServers();
     }, []);
 
-    // Refresh when the window regains focus so a server that just finished its
-    // OAuth flow in the browser shows as connected when the user returns.
+    // Refresh when the user returns from browser OAuth. Tauri deep links do not
+    // always produce a normal focus event when the Tools page is already shown.
     useEffect(() => {
         const onFocus = () => fetchServers();
+        const onToolsReturn = () => fetchServers();
         window.addEventListener('focus', onFocus);
-        return () => window.removeEventListener('focus', onFocus);
+        window.addEventListener('pipali:tools-return', onToolsReturn);
+        return () => {
+            window.removeEventListener('focus', onFocus);
+            window.removeEventListener('pipali:tools-return', onToolsReturn);
+        };
     }, []);
 
     const fetchServers = async () => {
@@ -34,7 +39,12 @@ export function McpToolsPage() {
             const res = await apiFetch('/api/mcp/servers');
             if (res.ok) {
                 const data = await res.json();
-                setServers(data.servers || []);
+                const nextServers = data.servers || [];
+                setServers(nextServers);
+                setSelectedServer(current => {
+                    if (!current) return current;
+                    return nextServers.find((server: McpServerInfo) => server.id === current.id) ?? current;
+                });
             }
         } catch (e) {
             console.error('Failed to fetch MCP servers', e);

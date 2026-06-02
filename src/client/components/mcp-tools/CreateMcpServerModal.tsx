@@ -3,6 +3,7 @@ import { X, Loader2, Terminal, Globe, Plus, Trash2, KeyRound, ShieldCheck, Circl
 import { useTranslation } from 'react-i18next';
 import type { McpTransportType, McpConfirmationMode, McpAuthType, CreateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
+import { McpOAuthAdvancedSettings, isGoogleApisUrl, parseOAuthScopes } from './McpOAuthAdvancedSettings';
 
 interface CreateMcpServerModalProps {
     onClose: () => void;
@@ -17,6 +18,10 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
     const [authType, setAuthType] = useState<McpAuthType>('none');
     const [path, setPath] = useState('');
     const [apiKey, setApiKey] = useState('');
+    const [oauthClientId, setOAuthClientId] = useState('');
+    const [oauthClientSecret, setOAuthClientSecret] = useState('');
+    const [oauthScopesText, setOAuthScopesText] = useState('');
+    const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
     const [confirmationMode, setConfirmationMode] = useState<McpConfirmationMode>('always');
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
 
@@ -35,6 +40,12 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
     }, [onClose]);
+
+    useEffect(() => {
+        if (transportType === 'http' && isGoogleApisUrl(path)) {
+            setIsAdvancedOpen(true);
+        }
+    }, [path, transportType]);
 
     const handleAddEnvVar = () => {
         setEnvVars([...envVars, { key: '', value: '' }]);
@@ -75,6 +86,9 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
             path,
             authType: transportType === 'http' ? authType : 'none',
             apiKey: transportType === 'http' && authType === 'bearer' ? apiKey || undefined : undefined,
+            oauthClientId: transportType === 'http' ? oauthClientId || undefined : undefined,
+            oauthClientSecret: transportType === 'http' ? oauthClientSecret || undefined : undefined,
+            oauthScopes: transportType === 'http' ? parseOAuthScopes(oauthScopesText) : undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
             confirmationMode,
         };
@@ -236,6 +250,17 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
                                     />
                                 </div>
                             )}
+
+                            <McpOAuthAdvancedSettings
+                                isOpen={isAdvancedOpen}
+                                onToggle={() => setIsAdvancedOpen(open => !open)}
+                                oauthClientId={oauthClientId}
+                                onOAuthClientIdChange={setOAuthClientId}
+                                oauthClientSecret={oauthClientSecret}
+                                onOAuthClientSecretChange={setOAuthClientSecret}
+                                oauthScopesText={oauthScopesText}
+                                onOAuthScopesTextChange={setOAuthScopesText}
+                            />
                         </>
                     )}
 

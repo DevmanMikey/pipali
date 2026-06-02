@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Trash2, Save, Play, Terminal, Globe, Plus, AlertCircle, CheckCircle, KeyRound, ShieldCheck, CircleSlash } from 'lucide-react';
 import type { McpServerInfo, McpTransportType, McpConfirmationMode, McpAuthType, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
 import { useTranslation } from 'react-i18next';
+import { McpOAuthAdvancedSettings, isGoogleApisUrl, parseOAuthScopes } from './McpOAuthAdvancedSettings';
 
 interface McpServerDetailModalProps {
     server: McpServerInfo;
@@ -17,6 +18,10 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
     const [authType, setAuthType] = useState<McpAuthType>(server.authType ?? (server.apiKey ? 'bearer' : 'none'));
     const [path, setPath] = useState(server.path);
     const [apiKey, setApiKey] = useState(server.apiKey || '');
+    const [oauthClientId, setOAuthClientId] = useState(server.oauthClientId || '');
+    const [oauthClientSecret, setOAuthClientSecret] = useState(server.oauthClientSecret || '');
+    const [oauthScopesText, setOAuthScopesText] = useState((server.oauthScopes || []).join('\n'));
+    const [isAdvancedOpen, setIsAdvancedOpen] = useState(() => isGoogleApisUrl(server.path));
     const [confirmationMode, setConfirmationMode] = useState<McpConfirmationMode>(server.confirmationMode);
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>(() => {
         if (!server.env) return [];
@@ -38,6 +43,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
     const [tools, setTools] = useState<McpToolInfo[]>([]);
     const [isLoadingTools, setIsLoadingTools] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+    const previousOAuthStatus = useRef(server.oauthStatus);
 
     // Check if there are unsaved changes
     const hasChanges = (() => {
@@ -46,6 +52,9 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         if (authType !== (server.authType ?? (server.apiKey ? 'bearer' : 'none'))) return true;
         if (path !== server.path) return true;
         if (authType === 'bearer' && apiKey !== (server.apiKey || '')) return true;
+        if (oauthClientId !== (server.oauthClientId || '')) return true;
+        if (oauthClientSecret !== (server.oauthClientSecret || '')) return true;
+        if (parseOAuthScopes(oauthScopesText).join('\n') !== (server.oauthScopes || []).join('\n')) return true;
         if (confirmationMode !== server.confirmationMode) return true;
 
         // Check env vars
@@ -78,6 +87,24 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [onClose]);
+
+    useEffect(() => {
+        if (transportType === 'http' && isGoogleApisUrl(path)) {
+            setIsAdvancedOpen(true);
+        }
+    }, [path, transportType]);
+
+    useEffect(() => {
+        const previousStatus = previousOAuthStatus.current;
+        if (server.authType === 'oauth' && server.oauthStatus === 'connected' && previousStatus !== 'connected') {
+            setError(null);
+            setTestResult({
+                success: true,
+                message: t('mcpTools.oauthConnected'),
+            });
+        }
+        previousOAuthStatus.current = server.oauthStatus;
+    }, [server.authType, server.oauthStatus, t]);
 
     const handleAddEnvVar = () => {
         setEnvVars([...envVars, { key: '', value: '' }]);
@@ -131,6 +158,9 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
             path,
             authType: transportType === 'http' ? authType : 'none',
             apiKey: transportType === 'http' && authType === 'bearer' ? apiKey || undefined : undefined,
+            oauthClientId: transportType === 'http' ? oauthClientId : undefined,
+            oauthClientSecret: transportType === 'http' ? oauthClientSecret : undefined,
+            oauthScopes: transportType === 'http' ? parseOAuthScopes(oauthScopesText) : undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
             confirmationMode,
             enabledTools: enabledToolsSet.size > 0 ? Array.from(enabledToolsSet) : undefined,
@@ -370,6 +400,17 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                                         />
                                     </div>
                                 )}
+
+                                <McpOAuthAdvancedSettings
+                                    isOpen={isAdvancedOpen}
+                                    onToggle={() => setIsAdvancedOpen(open => !open)}
+                                    oauthClientId={oauthClientId}
+                                    onOAuthClientIdChange={setOAuthClientId}
+                                    oauthClientSecret={oauthClientSecret}
+                                    onOAuthClientSecretChange={setOAuthClientSecret}
+                                    oauthScopesText={oauthScopesText}
+                                    onOAuthScopesTextChange={setOAuthScopesText}
+                                />
 
                                 {authType === 'oauth' && (
                                     <div className="mcp-oauth-section">
