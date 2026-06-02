@@ -266,6 +266,25 @@ function getAuthPageStyles(): string {
             margin: 0;
             line-height: 1.5;
         }
+
+        .btn {
+            display: inline-block;
+            margin-top: 1.5rem;
+            padding: 0.75rem 1.5rem;
+            background: var(--color-bg-muted);
+            color: var(--color-text);
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.9375rem;
+            border: 1px solid var(--color-border);
+            transition: background 150ms ease, border-color 150ms ease;
+        }
+
+        .btn:hover {
+            background: var(--color-bg-elevated);
+            border-color: var(--color-text-muted);
+        }
     `;
 }
 
@@ -328,7 +347,8 @@ function getTokenExtractorHtml(): string {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
             <h1>Login successful</h1>
-            <p class="subtitle">You can close this tab and return to the Pipali app.</p>
+            <p class="subtitle">Returning you to the Pipali app. You can close this tab once it's in focus.</p>
+            <a href="pipali://auth/callback" class="btn" id="open-app">Open Pipali</a>
         </div>
     </main>
     <script>
@@ -377,9 +397,14 @@ function getTokenExtractorHtml(): string {
             .then(data => {
                 if (data.success) {
                     if (data.desktopAuth) {
-                        // Desktop auth - show success message, user should return to app
+                        // Desktop auth - show success message, then auto-foreground the
+                        // app via the pipali:// deep link (same UX as VS Code). The OS
+                        // routes the link to the running app, which focuses its window.
+                        // The "Open Pipali" button is a fallback if the browser blocks
+                        // or the user dismisses the protocol-handler prompt.
                         document.getElementById('loading').style.display = 'none';
                         document.getElementById('success').style.display = 'block';
+                        window.location.href = 'pipali://auth/callback';
                     } else if (data.redirectUrl) {
                         // Web auth - redirect to app
                         window.location.replace(data.redirectUrl);
@@ -426,23 +451,6 @@ function getAuthErrorHtml(error: string): string {
             margin-top: 1.5rem;
             color: var(--color-error-text);
             font-size: 0.875rem;
-        }
-        .btn {
-            display: inline-block;
-            margin-top: 1.5rem;
-            padding: 0.75rem 1.5rem;
-            background: var(--color-bg-muted);
-            color: var(--color-text);
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: 500;
-            font-size: 0.9375rem;
-            border: 1px solid var(--color-border);
-            transition: background 150ms ease, border-color 150ms ease;
-        }
-        .btn:hover {
-            background: var(--color-bg-elevated);
-            border-color: var(--color-text-muted);
         }
     </style>
 </head>
